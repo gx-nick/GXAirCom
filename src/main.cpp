@@ -1749,6 +1749,9 @@ void setup() {
   #ifdef Heltec_Lora_V3
     setting.boardType = HELTEC_LORA_V3;
   #endif
+  #ifdef Heltec_E290
+    setting.boardType = HELTEC_E290;
+  #endif
   if (setting.boardType == eBoard::UNKNOWN){
     checkBoardType();
   }  
@@ -2317,6 +2320,42 @@ void setup() {
 
     PinExtPower = 36; //pin for external Voltage-control
     PinADCCtrl = 37; //pin for reading battery-voltage
+    PinADCVoltage = 1;
+    adcVoltageMultiplier =  5.2636f;
+    break;
+  case eBoard::HELTEC_E_290:
+    log_i("Board=Heltec-E290");
+
+    //e-ink
+    PinEink_Busy   =  6; // updated for e290   
+    PinEink_Rst    =  5; // updated for e290   
+    PinEink_Dc     =  4; // updated for e290   
+    PinEink_Cs     =  3; // updated for e290   
+    PinEink_Clk    =  2; // updated for e290   // is this sck? 
+    PinEink_Din    =  1; // updated for e290   // is this mosi? 
+
+    PinLoraRst = 12;   // is this present?? 
+    PinLoraDI0 = 14;   // checked - unchanged for e290   
+    PinLoraGPIO = 13;  // checked - unchanged for e290   
+    PinLora_SS = 8;    // checked - unchanged for e290   
+    PinLora_MISO = 11; // checked - unchanged for e290   
+    PinLora_MOSI = 10; // checked - unchanged for e290   
+    PinLora_SCK = 9;   // checked - unchanged for e290   
+
+    PinBaroSDA = 33;
+    PinBaroSCL = 34;
+    pI2cOne->begin(PinBaroSDA, PinBaroSCL);
+
+    //PinWindDir = 2;      // removed for e290   
+    //PinWindSpeed = 3;    // removed for e290   
+
+    PinOneWire = 4; //pin for one-Wire
+
+    //pinMode(35,OUTPUT);   // removed for e290   
+    //digitalWrite(35,LOW); // removed for e290   //switch user-LED off
+
+    PinExtPower = 36; //pin for external Voltage-control
+    PinADCCtrl = 7; // updated for e290   //pin for reading battery-voltage
     PinADCVoltage = 1;
     adcVoltageMultiplier =  5.2636f;
     break;
@@ -4361,7 +4400,7 @@ void taskStandard(void *pvParameters){
   long frequency = FREQUENCY868;
   fanet.setRFMode(setting.RFMode);
   uint8_t radioChip = RADIO_SX1276;
-  if ((setting.boardType == eBoard::T_BEAM_SX1262) || (setting.boardType == eBoard::T_BEAM_S3CORE) || (setting.boardType == eBoard::HELTEC_WIRELESS_STICK_LITE_V3) || (setting.boardType == eBoard::HELTEC_LORA_V3)) radioChip = RADIO_SX1262;
+  if ((setting.boardType == eBoard::T_BEAM_SX1262) || (setting.boardType == eBoard::T_BEAM_S3CORE) || (setting.boardType == eBoard::HELTEC_WIRELESS_STICK_LITE_V3) ||  (setting.boardType == eBoard::HELTEC_E_290) || (setting.boardType == eBoard::HELTEC_LORA_V3)) radioChip = RADIO_SX1262;
 
   // When the requested Address type is ICAO then the devId of the device must be set to your mode-s address
   // See Flarm Dataport Specification for details
