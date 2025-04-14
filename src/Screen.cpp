@@ -532,9 +532,14 @@ void Screen::drawMainScreen(void){
   static uint32_t tCharging = millis();
   static uint32_t tRun = millis();
 
+  bool altitudeIsInFeet = true;
+
   tAct = millis();
   //copy values
   actData.alt = (status.gps.Fix) ? status.gps.alt : status.vario.alt;
+  if (altitudeIsInFeet){
+    actData.alt = actData.alt * 3.28084; //convert to feet
+  }
   //log_i("%d,%.01f,%.01f",status.gps.Fix,status.gps.alt,status.vario.alt);
   actData.vario = status.vario.ClimbRate;
   actData.speed = status.gps.speed;
@@ -719,7 +724,7 @@ void Screen::drawMainScreen(void){
           pEInk->setCursor(5,62);
           pEInk->print("Altitude");
           pEInk->setCursor(98, 97);
-          pEInk->print('m');
+          altitudeIsInFeet ? pEInk->print('f') : pEInk->print('m');
           pEInk->setCursor(5,111);
           pEInk->print("Vario");
           pEInk->drawBitmap(98, 120, msicons, 24, 24, GxEPD_BLACK);   //GxEPD_BLACK);
@@ -811,7 +816,7 @@ void Screen::drawMainScreen(void){
 
           pEInk->setFont(&NotoSans6pt7b);
           pEInk->setCursor(103,10);
-          pEInk->print("Altitude [m]");
+          altitudeIsInFeet ? pEInk->print("Altitude [ft]") : pEInk->print("Altitude [m]");
           pEInk->setFont(&gnuvarioe23pt7b);
           drawValue(98,10,97,50,data.alt,0);
 
