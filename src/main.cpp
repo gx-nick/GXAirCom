@@ -1921,8 +1921,8 @@ void setup() {
     
     PinLoraRst = 23;
     if ((setting.displayType == EINK2_9) || (setting.displayType == EINK2_9_V2)){
-      PinLoraGPIO = 36;
-      PinLoraDI0 = 39;
+      //PinLoraGPIO = 36;
+      PinLoraDI0 = 26; //Board v1.2 39;
     }else{
       PinLoraGPIO = 32;
       PinLoraDI0 = 33;
@@ -1933,16 +1933,14 @@ void setup() {
     PinLora_MOSI = 27;
     PinLora_SCK = 5;
 
-    PinOledRst = -1;
-    PinOledSDA = 21;
-    PinOledSCL = 22;
+    //PinOledRst = -1;
+    //PinOledSDA = 21;
+    //PinOledSCL = 22;
 
     PinBaroSDA = 13;
     PinBaroSCL = 14;
-
-
     //V3.0.0 changed from PIN 0 to PIN 25
-    PinBuzzer = 25;
+    PinBuzzer = 21; //because this is where I physically put it 25;
 
     if (setting.Mode == eMode::GROUND_STATION){
       PinWindDir = 36;
