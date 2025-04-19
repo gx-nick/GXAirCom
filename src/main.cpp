@@ -1940,10 +1940,10 @@ void setupGPIOPins()
     case eBoard::T_BEAM: 
     log_i("Board=T_BEAM");
     GpsPin = {12,34,37}; //Tx, Rx, PPS
-    LoraPin = {23,26,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    LoraPin = {23,26,-1,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
     OLEDPMUPin = {-1,21,22}; //Rst, SDA, SCL
     BaroPin = {13,14}; //SDA, SCL
-    LedPin = {4,0}; //User, Beacon
+    LedPin = {4,-1}; //User, Beacon
 
     //V3.0.0 changed from PIN 0 to PIN 25
     PinBuzzer = 25;
@@ -1977,7 +1977,7 @@ void setupGPIOPins()
       LoraPin = {23,26,36,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
     }else{     
       LoraPin = {23,33,32,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
-      LedPin = {4,0}; //User, Beacon
+      LedPin = {4,-1}; //User, Beacon
     }
     OLEDPMUPin = {-1,21,22}; //Rst, SDA, SCL
     BaroPin = {13,14}; //SDA, SCL
