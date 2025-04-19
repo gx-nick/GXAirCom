@@ -2066,7 +2066,7 @@ void setupGPIOPins()
     PinBuzzer = 17;
     BaroPin = {13,23}; //SDA, SCL
     PinOneWire = 22;    
-    AnemometerPin = {36,37,-38}; //WindDir, WindSpeed, RainGauge
+    AnemometerPin = {36,37,38}; //WindDir, WindSpeed, RainGauge
 
     #ifdef GXTEST
       GpsPin.PPS = 37;
