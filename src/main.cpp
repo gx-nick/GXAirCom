@@ -11,6 +11,7 @@
 #include <FlarmDataPort.h>
 #include <main.h>
 #include <config.h>
+#include <gpioconfig.h>
 #include "WebHelper.h"
 #include "fileOps.h"
 #include <SPIFFS.h>
@@ -39,11 +40,9 @@
 #include "XPowersLib.h"
 #include "TimeDefs.h"
 
-
 //#define SEND_RAW_WIND_DATA
 
 XPowersLibInterface *PMU = NULL;
-
 
 //#define GXTEST
 //#define FLARMTEST
@@ -97,9 +96,7 @@ XPowersLibInterface *PMU = NULL;
 //#include "driver/rtc_io.h"
 #endif
 
-
 #ifdef GSMODULE
-
 #include <Dusk2Dawn.h> //for sunset and sunrise-functions
 #include <Weather.h>
 #include <WeatherUnderground.h>
@@ -110,11 +107,7 @@ XPowersLibInterface *PMU = NULL;
 
 RTC_DS3231 *pRtc3231 = NULL;
 DFRobot_SD3031 *pRtc3031 = NULL;
-
 #endif
-
-
-
 
 #define uS_TO_S_FACTOR 1000000uL  /* Conversion factor for micro seconds to seconds */
 //#define uS_TO_ms_FACTOR 1000000uL  /* Conversion factor for micro seconds to seconds */
@@ -220,78 +213,26 @@ SemaphoreHandle_t ble_queue = nullptr;
 SemaphoreHandle_t RxBleQueue = nullptr;
 #endif
 
-
-
 uint32_t psRamSize = 0;
-
 uint32_t fanetDstId = 0;
-
 
 //PIN-Definition
 int8_t PinPMU_Irq   =  35;
 
-//e-ink
-int8_t PinEink_Busy   =  33;
-int8_t PinEink_Rst    =  0;
-int8_t PinEink_Dc     =  32;
-int8_t PinEink_Cs     =  15;
-int8_t PinEink_Clk    =  4;
-int8_t PinEink_Din    =  2;
-
-
-//LED
-int8_t PinUserLed = -1;
-int8_t PinBeaconLed = -1;
-
-//Power
-int8_t PinExtPower = -1;
-
-//ADC-Voltage
-int8_t PinADCCtrl = -1;
-int8_t PinADCVoltage = -1;
-
-//LORA-Module
-int8_t PinLoraRst = -1;
-int8_t PinLoraDI0 = -1;
-int8_t PinLoraGPIO = -1;
-int8_t PinLora_SS = -1;
-int8_t PinLora_MISO = -1;
-int8_t PinLora_MOSI = -1;
-int8_t PinLora_SCK = -1;
-
-//GSM-Module
-int8_t PinGsmPower = -1;
-int8_t PinGsmRst = -1;
-int8_t PinGsmTx = -1;
-int8_t PinGsmRx = -1;
-
-//GPS
-int8_t PinGPSRX = -1;
-int8_t PinGPSTX = -1;
-int8_t PinPPS = -1;
-
-//OLED-Display / PMU
-int8_t PinOledRst = -1;
-int8_t PinOledSDA = -1;
-int8_t PinOledSCL = -1;
-
-//BARO
-int8_t PinBaroSDA = -1;
-int8_t PinBaroSCL = -1;
+EInkPins EInkPin = {33, 0, 32, 15, 4, 2}; //busy, rst, dc, cs, clk, din
+LEDPins LedPin = {-1, -1}; //User, Beacon
+PowerPins PowerPin = {-1, -1, -1, -1}; //ExtPower, ExtPowerOnOff, ADCCtrl, ADCVoltage
+LoraPins LoraPin = {-1, -1, -1, -1, -1, -1, -1}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+GSMPins GSMPin = {-1, -1, -1, -1}; //Rst, Power, Tx, Rx
+GPSPins GpsPin = {-1, -1, -1}; //Tx, Rx, PPS
+OLEDPMUPins OLEDPMUPin = {-1, -1, -1}; //oled/PMU pins: Rst, SDA, SCL
+BaroPins BaroPin = {-1, -1}; //SDA, SCL
 
 //BUZZER
 int8_t PinBuzzer = -1;
-
 //ONE-WIRE
 int8_t PinOneWire = -1;
-
-//anemometer
-int8_t PinWindDir = -1;
-int8_t PinWindSpeed = -1;
-int8_t PinRainGauge = -1;
-
-//external Power on/off
-int8_t PinExtPowerOnOff = -1;
+AnemometerPins AnemometerPin = {-1, -1, -1}; //WindDir, WindSpeed, RainGauge
 
 //fuel-sensor
 int8_t PinFuelSensor = -1;
@@ -317,7 +258,6 @@ uint8_t wdCount = 0;
 char* pWdRaw = NULL;
 uint8_t wdRawCount = 0;
 #endif
-
 
 TaskHandle_t xHandleBaro = NULL;
 TaskHandle_t xHandleStandard = NULL;
@@ -607,26 +547,20 @@ void handleEvent(ace_button::AceButton* button, uint8_t eventType, uint8_t butto
 
 void checkLoraChip(){
   //we check the Lora-Chip, if it is a SX1276
-  PinLoraRst = 23;
-  PinLoraDI0 = 26;
-  PinLora_SS = 18;
-  PinLora_MISO = 19;
-  PinLora_MOSI = 27;
-  PinLora_SCK = 5;
-
-  SPI.begin(PinLora_SCK, PinLora_MISO, PinLora_MOSI, PinLora_SS);
-  pinMode(PinLoraRst,OUTPUT);
-  pinMode(PinLora_SS,OUTPUT);
-  digitalWrite(PinLoraRst,LOW);
+  LoraPin = {23,26,-1,18,19,27,5}; //SX1276 pins for Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+  SPI.begin(LoraPin._SCK, LoraPin._MISO, LoraPin._MOSI, LoraPin._SS);
+  pinMode(LoraPin.Rst,OUTPUT);
+  pinMode(LoraPin._SS,OUTPUT);
+  digitalWrite(LoraPin.Rst,LOW);
   delay(5);
-  digitalWrite(PinLoraRst,HIGH);
+  digitalWrite(LoraPin.Rst,HIGH);
   delay(5);
   SPISettings _spiSettings = SPISettings(8000000, MSBFIRST, SPI_MODE0);
-  digitalWrite(PinLora_SS,LOW);
+  digitalWrite(LoraPin._SS,LOW);
   SPI.beginTransaction(_spiSettings);  
   SPI.transfer(0x42); //read reg 0x42
   uint8_t v = SPI.transfer(0x00);
-  digitalWrite(PinLora_SS,HIGH);
+  digitalWrite(LoraPin._SS,HIGH);
   SPI.endTransaction();
   //log_i("Lora-Chip-Version=%02X",v);
   if (v == 0x12){
@@ -683,10 +617,9 @@ void checkBoardType(){
     delay(1000);
     esp_restart(); //we need to restart
   #endif
-  log_i("start checking board-type");  
-  PinOledSDA = 21;
-  PinOledSCL = 22;
-  pI2cOne->begin(PinOledSDA, PinOledSCL);
+  log_i("start checking board-type");
+  OLEDPMUPins OLEDPMUPin = {-1,21,22}; //OLED/PMU pins for Rst, SDA, SCL
+  pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
   uint8_t i2cDevices = checkI2C();
   if (i2cDevices < 10){
     pI2cOne->beginTransmission(AXP192_SLAVE_ADDRESS);
@@ -722,15 +655,14 @@ void checkBoardType(){
     }
   }
   setting.displayType = NO_DISPLAY;
-  PinOledSDA = 4;
-  PinOledSCL = 15;
-  PinOledRst = 16;
-  pI2cOne->begin(PinOledSDA, PinOledSCL);
+  
+  OLEDPMUPin = {16,4,15}; //OLED/PMU pins for Rst, SDA, SCL
+  pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
   i2cDevices = checkI2C();
-  pinMode(PinOledRst, OUTPUT);
-  digitalWrite(PinOledRst, LOW);
+  pinMode(OLEDPMUPin.Rst, OUTPUT);
+  digitalWrite(OLEDPMUPin.Rst, LOW);
   delay(100);
-  digitalWrite(PinOledRst, HIGH);
+  digitalWrite(OLEDPMUPin.Rst, HIGH);
   delay(100);
   pI2cOne->beginTransmission(OLED_SLAVE_ADDRESS);
   if (pI2cOne->endTransmission() == 0) {
@@ -1151,7 +1083,7 @@ void setupPMU(){
       PMU = new XPowersAXP2101(*pI2cZero,42,41,AXP2101_SLAVE_ADDRESS);
     }else{
       PMUMutex = &xI2C1Mutex;
-      PMU = new XPowersAXP2101(*pI2cOne,PinOledSDA,PinOledSCL,AXP2101_SLAVE_ADDRESS);
+      PMU = new XPowersAXP2101(*pI2cOne,OLEDPMUPin.SDA,OLEDPMUPin.SCL,AXP2101_SLAVE_ADDRESS);
     }
 
     if (!PMU->init()) {
@@ -1165,7 +1097,7 @@ void setupPMU(){
   }
   if (!PMU){
     PMUMutex = &xI2C1Mutex;
-    PMU = new XPowersAXP192(*pI2cOne,PinOledSDA,PinOledSCL,AXP192_SLAVE_ADDRESS);
+    PMU = new XPowersAXP192(*pI2cOne,OLEDPMUPin.SDA,OLEDPMUPin.SCL,AXP192_SLAVE_ADDRESS);
     if (!PMU->init()) {
         //Serial.println("Warning: Failed to find AXP192 power management");
         delete PMU;
@@ -1890,39 +1822,39 @@ void setup() {
   buttonConfig->setLongPressDelay(1000); //set long-press-delay to 500ms
   buttonConfig->setClickDelay(500); //set click-delay to 200ms
 
-  if (PinBeaconLed >= 0) {
-    pinMode(PinBeaconLed, OUTPUT);
-    digitalWrite(PinBeaconLed,LOW); 
+  if (LedPin.Beacon >= 0) {
+    pinMode(LedPin.Beacon, OUTPUT);
+    digitalWrite(LedPin.Beacon,LOW); 
   }
-  if (PinUserLed >= 0){
-    pinMode(PinUserLed, OUTPUT);
-    digitalWrite(PinUserLed,HIGH); 
+  if (LedPin.User >= 0){
+    pinMode(LedPin.User, OUTPUT);
+    digitalWrite(LedPin.User,HIGH); 
   }
-  if (PinExtPowerOnOff >= 0){
-    pinMode(PinExtPowerOnOff, INPUT);
-    log_i("ext power-state=%d",digitalRead(PinExtPowerOnOff));
+  if (PowerPin.ExtPowerOnOff >= 0){
+    pinMode(PowerPin.ExtPowerOnOff, INPUT);
+    log_i("ext power-state=%d",digitalRead(PowerPin.ExtPowerOnOff));
   }
-  if (PinExtPower >= 0){
-    pinMode(PinExtPower, OUTPUT); //we have to set pin 21 to measure voltage of Battery
-    digitalWrite(PinExtPower,LOW); //set output to Low, so we can measure the voltage
+  if (PowerPin.ExtPower >= 0){
+    pinMode(PowerPin.ExtPower, OUTPUT); //we have to set pin 21 to measure voltage of Battery
+    digitalWrite(PowerPin.ExtPower,LOW); //set output to Low, so we can measure the voltage
     log_i("set ext-power");
     delay(500); //wait until devices are on
   }
-  if (PinADCCtrl >= 0){
+  if (PowerPin.ADCCtrl >= 0){
     if (setting.boardType == eBoard::HELTEC_VISION_MASTER_E290) {
       // on this board there is a transistor before the MOS-FET, so signal is inverted
-      pinMode(PinADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
-      digitalWrite(PinADCCtrl,HIGH); //set output to high, so we can measure the voltage  
+      pinMode(PowerPin.ADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
+      digitalWrite(PowerPin.ADCCtrl,HIGH); //set output to high, so we can measure the voltage  
       log_i("set adcCtrl HIGH"); 
      } else {  
-       pinMode(PinADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
-       digitalWrite(PinADCCtrl,LOW); //set output to Low, so we can measure the voltage  
+       pinMode(PowerPin.ADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
+       digitalWrite(PowerPin.ADCCtrl,LOW); //set output to Low, so we can measure the voltage  
        log_i("set adcCtrl LOW"); 
      }
     delay(100); 
   }
-  if (PinADCVoltage >= 0){
-    pinMode(PinADCVoltage, INPUT); //set pin ADC-Voltage as input
+  if (PowerPin.ADCVoltage >= 0){
+    pinMode(PowerPin.ADCVoltage, INPUT); //set pin ADC-Voltage as input
   }
 
   #ifdef GSMODULE
@@ -2007,35 +1939,20 @@ void setupGPIOPins()
   {
     case eBoard::T_BEAM: 
     log_i("Board=T_BEAM");
-    PinGPSRX = 34;
-    PinGPSTX = 12;
-    PinPPS = 37;
-
-    PinLoraRst = 23;
-    PinLoraDI0 = 26;
-    PinLora_SS = 18;
-    PinLora_MISO = 19;
-    PinLora_MOSI = 27;
-    PinLora_SCK = 5;
-
-    PinOledRst = -1;
-    PinOledSDA = 21;
-    PinOledSCL = 22;
-
-    PinBaroSDA = 13;
-    PinBaroSCL = 14;
-    
-    PinUserLed = 4;
+    GpsPin = {12,34,37}; //Tx, Rx, PPS
+    LoraPin = {23,26,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    OLEDPMUPin = {-1,21,22}; //Rst, SDA, SCL
+    BaroPin = {13,14}; //SDA, SCL
+    LedPin = {4,0}; //User, Beacon
 
     //V3.0.0 changed from PIN 0 to PIN 25
     PinBuzzer = 25;
 
     if (setting.Mode == eMode::GROUND_STATION){
-      PinWindDir = 36;
-      PinWindSpeed = 39;
+      AnemometerPin = {36,39,-1};
     }else{
       if (setting.bHasExtPowerSw){
-        PinExtPowerOnOff = 36;
+        PowerPin.ExtPowerOnOff = 36;
       }
     }
 
@@ -2047,46 +1964,31 @@ void setupGPIOPins()
       pinMode(PinFuelSensor, INPUT);
     }      
 
-    pI2cOne->begin(PinOledSDA, PinOledSCL);
+    pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
     setupPMU();
     //for new T-Beam output 4 is red led
 
     break;
   case eBoard::T_BEAM_SX1262: 
     log_i("Board=T_BEAM SX1262");
-    PinGPSRX = 34;
-    PinGPSTX = 12;
-    PinPPS = 37;
+    GpsPin = {12,34,37};
     
-    PinLoraRst = 23;
-    if ((setting.displayType == EINK2_9) || (setting.displayType == EINK2_9_V2)){
-      PinLoraGPIO = 36;
-      PinLoraDI0 = 26; //Board v1.2 39;
-    }else{
-      PinLoraGPIO = 32;
-      PinLoraDI0 = 33;
-      PinUserLed = 4;
+    if ((setting.displayType == EINK2_9) || (setting.displayType == EINK2_9_V2)){      
+      LoraPin = {23,26,36,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    }else{     
+      LoraPin = {23,33,32,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+      LedPin = {4,0}; //User, Beacon
     }
-    PinLora_SS = 18;
-    PinLora_MISO = 19;
-    PinLora_MOSI = 27;
-    PinLora_SCK = 5;
-
-    PinOledRst = -1;
-    PinOledSDA = 21;
-    PinOledSCL = 22;
-
-    PinBaroSDA = 13;
-    PinBaroSCL = 14;
+    OLEDPMUPin = {-1,21,22}; //Rst, SDA, SCL
+    BaroPin = {13,14}; //SDA, SCL
+    PinBuzzer = 25; 
     //V3.0.0 changed from PIN 0 to PIN 25
-    PinBuzzer = 25;
 
     if (setting.Mode == eMode::GROUND_STATION){
-      PinWindDir = 36;
-      PinWindSpeed = 39;
+      AnemometerPin = {36,39,-1};
     }else{
       if (setting.bHasExtPowerSw){
-        PinExtPowerOnOff = 36;
+        PowerPin = {-1,36,-1,-1}; //ExtPower, ExtPowerOnOff, ADCCtrl, ADCVoltage
       }
     }
     sButton[1].PinButton = 38;
@@ -2097,33 +1999,22 @@ void setupGPIOPins()
       pinMode(PinFuelSensor, INPUT);
     }      
 
-    pI2cOne->begin(PinOledSDA, PinOledSCL);
+    pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
     setupPMU();
     //for new T-Beam output 4 is red led
 
     break;
   case eBoard::T_BEAM_V07:
     log_i("Board=T_BEAM_V07");
-    //PinGPSRX = 34;
-    //PinGPSTX = 39;
-    PinGPSRX = 12; //T-Beam V07
-    PinGPSTX = 15;
-
-    PinLoraRst = 23;
-    PinLoraDI0 = 26;
-    PinLora_SS = 18;
-    PinLora_MISO = 19;
-    PinLora_MOSI = 27;
-    PinLora_SCK = 5;
-
-    PinOledRst = -1;
-    PinOledSDA = 21;
-    PinOledSCL = 22;
-
-    PinBaroSDA = 13;
-    PinBaroSCL = 14;
+    //GSMPin.Rx = 34;
+    //GpsPin.Tx = 39;
+    GpsPin = {15,12,-1}; //Tx, Rx, PPS
+    LoraPin = {23,26,-1,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    OLEDPMUPin = {-1,21,22}; //Rst, SDA, SCL
+    BaroPin = {13,14}; //SDA, SCL
+    
     // set gpio 4 as INPUT
-    pinMode(PinBaroSCL, INPUT_PULLUP);
+    pinMode(BaroPin.SCL, INPUT_PULLUP);
 
     if (setting.bHasFuelSensor){
       PinFuelSensor = 39;
@@ -2135,78 +2026,50 @@ void setupGPIOPins()
     // Lilygo T3 v2.1.1.6 extra button on 0
     sButton[1].PinButton = 0;
 
-    pI2cOne->begin(PinOledSDA, PinOledSCL);
+    pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
     // voltage-divier 100kOhm and 100kOhm
     // vIn = (R1+R2)/R2 * VOut
-    PinADCVoltage = 35;
+    PowerPin.ADCVoltage = 35;
     adcVoltageMultiplier = 2.12f;
     if (setting.Mode == eMode::GROUND_STATION){
-      PinWindDir = 36;
-      PinWindSpeed = 39;
+      AnemometerPin = {36,39,-1};
     }    
     break;
   case eBoard::TTGO_T3_V1_6:
     log_i("Board=TTGO T3 V1.6");
-    PinGPSRX = 36;
-    PinGPSTX = 19;
-    PinPPS = 39;
-
-    PinLoraRst = 23;
-    PinLoraDI0 = 26;
-    PinLora_SS = 18;
-    PinLora_MISO = 19;
-    PinLora_MOSI = 27;
-    PinLora_SCK = 5;
-
-    PinBeaconLed = 25;
-
-    PinOledSDA = 21;
-    PinOledSCL = 22;
+    GpsPin = {19,36,39}; //Tx, Rx, PPS
+    LoraPin = {23,26,-1,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    OLEDPMUPin = {-1,21,22}; //Rst, SDA, SCL
+    LedPin = {-1,25}; //User, Beacon
 
     // voltage-divier 100kOhm and 100kOhm
     // vIn = (R1+R2)/R2 * VOut
-    PinADCVoltage = 35;
+    PowerPin.ADCVoltage = 35;
     adcVoltageMultiplier = 2.12f;    
 
-    pI2cOne->begin(PinOledSDA, PinOledSCL);
+    pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
     break;
   case eBoard::HELTEC_LORA:
     log_i("Board=HELTEC_LORA");
-    //PinGPSRX = 34;
-    //PinGPSTX = 39;
-    PinGPSRX = 12;
-    //PinGPSTX = 15; // no GPS-TX
-
-    PinLoraRst = 14;
-    PinLoraDI0 = 26;
-    PinLora_SS = 18;
-    PinLora_MISO = 19;
-    PinLora_MOSI = 27;
-    PinLora_SCK = 5;
-    PinGsmRst = 25;
-    PinGsmTx = 21;
-    PinGsmRx = 35;
+    //GSMPin.Rx = 34;
+    //GpsPin.Tx = 39;
+    GpsPin = {-1,12,-1}; //Tx, Rx, PPS
+    //GpsPin.Tx = 15; // no GPS-TX
+    LoraPin = {14,26,-1,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    GSMPin = {25,-1,21,35}; //Rst, Power, Tx, Rx
 
     if (setting.displayType == OLED0_96){
-      PinOledRst = 16;
-      PinOledSDA = 4;
-      PinOledSCL = 15;
-      pI2cOne->begin(PinOledSDA, PinOledSCL);
+      OLEDPMUPin = {16,4,15};
+      pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
     }
 
     PinBuzzer = 17;
-
-    PinBaroSDA = 13;
-    PinBaroSCL = 23;
-
+    BaroPin = {13,23}; //SDA, SCL
     PinOneWire = 22;    
-
-    PinWindDir = 36;
-    PinWindSpeed = 37;
-    PinRainGauge = 38;
+    AnemometerPin = {36,37,-38}; //WindDir, WindSpeed, RainGauge
 
     #ifdef GXTEST
-      PinPPS = 37;
+      GpsPin.PPS = 37;
     #endif
     
     if (setting.bHasFuelSensor){
@@ -2220,111 +2083,61 @@ void setupGPIOPins()
     // voltage-divier 27kOhm and 100kOhm
     // vIn = (R1+R2)/R2 * VOut
     //1S LiPo
-    PinADCVoltage = 34;
+    PowerPin.ADCVoltage = 34;
     adcVoltageMultiplier = (100000.0f + 27000.0f) / 100000.0f;
     break;
   case eBoard::HELTEC_WIRELESS_STICK_LITE:
     log_i("Board=Heltec Wireless Stick Lite");
 
 #ifdef AIRMODULE
-    PinBeaconLed = 25;
+    LedPin = {-1,25}; //User, Beacon
 #endif
-
-    PinGPSRX = 9;
-    PinGPSTX = 10;
-    PinPPS = 23;
-
-
-    PinLoraRst = 14;
-    PinLoraDI0 = 26;
-    PinLora_SS = 18;
-    PinLora_MISO = 19;
-    PinLora_MOSI = 27;
-    PinLora_SCK = 5;
-
-    PinBaroSDA = 32;
-    PinBaroSCL = 33;
+    GpsPin = {10,9,23}; //Tx, Rx, PPS
+    LoraPin = {14,26,-1,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    BaroPin = {32,33}; //SDA, SCL
 
     //PinOneWire = 22;    
-
-    PinWindDir = 36;
-    PinWindSpeed = 39;
-    PinRainGauge = 38;
+    AnemometerPin = {36,39,38};
 
     sButton[0].PinButton = 0; //pin for program-button
 
     // voltage-divier 27kOhm and 100kOhm
     // vIn = (R1+R2)/R2 * VOut
     //1S LiPo
-    PinExtPower = 21;
+    PowerPin = {21,-1,-1,37}; //ExtPower, ExtPowerOnOff, ADCCtrl, ADCVoltage
     //adcVoltageMultiplier =  (100000.0f + 220000.0f) / 100000.0f;
-    PinADCVoltage = 37;
     adcVoltageMultiplier =  3.69f;
     break;
   case eBoard::HELTEC_WIRELESS_STICK:
     log_i("Board=HELTEC Wireless Stick");
 #ifdef AIRMODULE
-    PinBeaconLed = 25;
+    LedPin = {-1,25};
 #endif
     sButton[0].PinButton = 0; //pin for program-button
     
-    //PinGPSRX = 34;
-    //PinGPSTX = 39;
+    //GpsPin = {39,34,-1};
+    LoraPin = {14,26,-1,18,19,27,5}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    OLEDPMUPin = {16,4,15}; //Rst, SDA, SCL
+    pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
 
-
-    PinLoraRst = 14;
-    PinLoraDI0 = 26;
-    PinLora_SS = 18;
-    PinLora_MISO = 19;
-    PinLora_MOSI = 27;
-    PinLora_SCK = 5;
-
-    PinOledRst = 16;
-    PinOledSDA = 4;
-    PinOledSCL = 15;
-    pI2cOne->begin(PinOledSDA, PinOledSCL);
-
-    PinBaroSDA = 12;
-    PinBaroSCL = 13;
-
-    PinWindDir = 36;
-    PinWindSpeed = 39;
+    BaroPin = {12,13};
+    AnemometerPin = {36,39,-1};
 
     PinOneWire = 23;   
-
-    PinExtPower = 21;
+    PowerPin = {21,-1,-1,-1}; //ExtPower, ExtPowerOnOff, ADCCtrl, ADCVoltage
     break;
   case eBoard::TTGO_TSIM_7000:
     log_i("Board=TTGO_TSIM_7000");
 
-    //E-Ink
-    PinEink_Busy   =  39;
-    PinEink_Rst    =  25;
-    PinEink_Dc     =  15;
-    PinEink_Cs     =  13;
-    PinEink_Clk    =  14;
-    PinEink_Din    =  2;
+    EInkPin = {39,25,15,13,14,2}; //DC, RST, CS, BUSY, CLK, MOSI
+    LoraPin = {12,32,-1,5,19,23,18}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
 
-
-    PinLoraRst = 12;
-    PinLoraDI0 = 32;
-    PinLora_SS = 5;
     //pinMode(5, OUTPUT);
     //digitalWrite(5,LOW); 
-    //PinLora_SS = 16; //unused Pin, but pin5 is also for reset of GSM
-    PinLora_MISO = 19;
-    PinLora_MOSI = 23;
-    PinLora_SCK = 18;
-    PinGsmRst = 4; //is PowerKey, but IO5 is covered by Lora SS
-    PinGsmTx = 27;
-    PinGsmRx = 26;
 
-    PinOledRst = -1; //no oled-support yet
-    PinOledSDA = -1;
-    PinOledSCL = -1;
-
-    PinBaroSDA = 21;
-    PinBaroSCL = 22;
+    GSMPin = {4,-1,26,27}; //Rst, Power, Tx, Rx //4 is PowerKey, but IO5 is covered by Lora SS
+    OLEDPMUPin = {-1,-1,-1}; //Rst, SDA, SCL. no oled-support yet
+    BaroPin = {21,22}; //SDA, SCL
 
     if (setting.displayType > 1){
       PinOneWire = -1; //no one-wire if display is eink, cause we need that pin
@@ -2332,79 +2145,43 @@ void setupGPIOPins()
       PinOneWire = 25;    
     }
     
-
-    PinWindDir = 33;
-    PinWindSpeed = 34;
-    PinRainGauge = 39;
-
-    
-    //PinUserLed = 12; //PinLoraRst
-    
+    AnemometerPin = {33,34,39}; //WindDir, WindSpeed, RainGauge
+    //LedPin.User = 12; //LoraPin.Rst    
     PinBuzzer = 0;
 
     // voltage-divier 100kOhm and 100kOhm
     // vIn = (R1+R2)/R2 * VOut
-    PinADCVoltage = 35;
+    PowerPin.ADCVoltage = 35;
     adcVoltageMultiplier = 2.2279f; // not sure if it is ok ?? don't have this kind of board
 
     break;
   case eBoard::TTGO_TCALL_800:
+    LoraPin = {12,32,-1,5,19,17,18}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    BaroPin = {21,22}; //SDA, SCL
+    GSMPin = {4,23,27,26}; //Rst, Power, Tx, Rx //4 is PowerKey, but IO5 is covered by Lora SS
 
-    PinLoraRst = 12;
-    PinLoraDI0 = 32;
-    PinLora_SS = 5;
-    //pinMode(5, OUTPUT);
-    //digitalWrite(5,LOW); 
-    //PinLora_SS = 16; //unused Pin, but pin5 is also for reset of GSM
-    PinLora_MISO = 19;
-    PinLora_MOSI = 17;
-    PinLora_SCK = 18;
-
-    PinBaroSDA = 21;
-    PinBaroSCL = 22;
-
-    PinGsmPower = 23;
-    PinGsmRst = 4; //is PowerKey, but IO5 is covered by Lora SS
-    PinGsmTx = 27;
-    PinGsmRx = 26;
-
-    PinADCVoltage = 35;
+    PowerPin.ADCVoltage = 35;
     adcVoltageMultiplier = 2.12f; // not sure if it is ok ?? don't have this kind of board    
 
     break;
   case eBoard::T_BEAM_S3CORE:
     log_i("Board=T_BEAM-S3CORE");
     //setting.displayType = eDisplay::OLED0_96;
-    PinGPSRX = 9;
-    PinGPSTX = 8;
+    GpsPin = {8,9,6}; //Tx, Rx, PPS
     //wakeup GPS
     pinMode(7,OUTPUT);
     digitalWrite(7,LOW);
 
-    PinPPS = 6;
-
-    PinLoraRst = 5;
-    PinLoraDI0 = 1;
-    PinLoraGPIO = 4;
-    PinLora_SS = 10;
-    PinLora_MISO = 13;
-    PinLora_MOSI = 11;
-    PinLora_SCK = 12;
-
-    PinOledRst = -1;
-    PinOledSDA = 17; //OLED + BARO + RTC
-    PinOledSCL = 18; //OLED + BARO + RTC
-    //PinOledSDA = 42; //PMU
-    //PinOledSCL = 41; //PMU
-
-    PinBaroSDA = 17;
-    PinBaroSCL = 18;
-    pI2cOne->begin(PinBaroSDA, PinBaroSCL);
+    LoraPin = {5,1,4,10,13,11,12}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    OLEDPMUPin = {-1,17,18}; //Rst, SDA, SCL (42, 41; //PMU)
+    BaroPin = {17,18}; //SDA, SCL
+    
+    pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
     PinPMU_Irq = 40;
     PinBuzzer = 48;
     setupPMU();
     /*
-    pI2cZero->begin(PinBaroSDA, PinBaroSCL);
+    pI2cZero->begin(BaroPin.SDA, BaroPin.SCL);
     while(1){
       i2cScanner();
       delay(5000);
@@ -2415,68 +2192,45 @@ void setupGPIOPins()
   case eBoard::HELTEC_WIRELESS_STICK_LITE_V3:
     log_i("Board=wireless-StickV3");
     sButton[0].PinButton = 0; //pin for program-button
-    PinLoraRst = 12;
-    PinLoraDI0 = 14;
-    PinLoraGPIO = 13;
-    PinLora_SS = 8;
-    PinLora_MISO = 11;
-    PinLora_MOSI = 10;
-    PinLora_SCK = 9;
 
-    PinBaroSDA = 33;
-    PinBaroSCL = 34;
-    pI2cOne->begin(PinBaroSDA, PinBaroSCL);
+    LoraPin = {12,14,14,8,11,10,9}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    BaroPin = {33,34}; //SDA, SCL
+    pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
 
-    PinWindDir = 2;
-    PinWindSpeed = 3;    
-
+    AnemometerPin = {2,3,-1}; //WindDir, WindSpeed, RainGauge
     PinOneWire = 4; //pin for one-Wire
 
     #ifdef TINY_GSM_MODEM_SIM7080
-      PinGsmRst = 7; //is PowerKey
-      PinGsmTx = 5;
-      PinGsmRx = 6;
+      GSMPin.Rst = 7; //is PowerKey
+      GSMPin.Tx = 5;
+      GSMPin.Rx = 6;
     #endif
 
     pinMode(35,OUTPUT);
     digitalWrite(35,LOW); //switch user-LED off
 
-    PinExtPower = 36; //pin for external Voltage-control
-    PinADCCtrl = 37; //pin for reading battery-voltage
-    PinADCVoltage = 1;
+    PowerPin.ExtPower = 36; //pin for external Voltage-control
+    PowerPin.ADCCtrl = 37; //pin for reading battery-voltage
+    PowerPin.ADCVoltage = 1;
     adcVoltageMultiplier =  5.2636f;
     break;
   case eBoard::HELTEC_LORA_V3:
     log_i("Board=HELTEC_LORA_V3");
 
-    PinLora_SS = 8;
-    PinLora_SCK = 9;
-    PinLora_MOSI = 10;
-    PinLora_MISO = 11;
-    PinLoraRst = 12;
-    PinLoraGPIO = 13;
-    PinLoraDI0 = 14;
+    LoraPin = {12,13,14,8,11,10,9}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    OLEDPMUPin = {21,17,18}; //Rst, SDA, SCL
+    BaroPin = {2,3}; //SDA, SCL
 
-    PinOledRst = 21;
-    PinOledSDA = 17;
-    PinOledSCL = 18;
-    pI2cOne->begin(PinOledSDA, PinOledSCL);
+    pI2cOne->begin(OLEDPMUPin.SDA, OLEDPMUPin.SCL);
 
-    PinBaroSDA = 2;
-    PinBaroSCL = 3;
-
-    //pI2cOne->begin(PinBaroSDA, PinBaroSCL);
-
-    PinWindDir = 6;
-    PinWindSpeed =7;    
-
+    //pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
+    AnemometerPin = {6,7,-1}; //WindDir, WindSpeed, RainGauge
+   
     pinMode(35,OUTPUT);
     digitalWrite(35,LOW); //switch user-LED off
     //digitalWrite(35,HIGH);
 
-    PinExtPower = 36; //pin for external Voltage-control
-    PinADCCtrl = 37; //pin for reading battery-voltage
-    PinADCVoltage = 1;
+    PowerPin = {36,-1,37,1}; //ExtPower, ExtPowerOnOff, ADCCtrl, ADCVoltage
     adcVoltageMultiplier =  5.2636f;
     break;
 
@@ -2485,50 +2239,36 @@ void setupGPIOPins()
     #ifdef VISIONMASTER_E290
     log_i("Board=Vision Master E290");
     sButton[0].PinButton = 0; //pin for program-button
-    PinLoraRst = 12;
-    PinLoraDI0 = 14;
-    PinLoraGPIO = 13;
-    PinLora_SS = 8;
-    PinLora_MISO = 11;
-    PinLora_MOSI = 10;
-    PinLora_SCK = 9;
+    
+    LoraPin = {12,14,13,8,11,10,9}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
+    OLEDPMUPin = {21,17,18}; //Rst, SDA, SCL
+    BaroPin = {39,38}; //SDA, SCL
 
-    PinBaroSDA = 39;  // Quicklink
-    PinBaroSCL = 38;  // Quicklink
-
-    pI2cOne->begin(PinBaroSDA, PinBaroSCL);
+    pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
 
     if (setting.Mode==AIR_MODULE) {
-     PinGPSRX = 48;// TX = Greeen
-     PinGPSTX = 47;// RX = White
-     PinPPS =17;
+     GSMPin.Rx = 48;// TX = Greeen
+     GpsPin.Tx = 47;// RX = White
+     GpsPin.PPS =17;
      //V3.0.0 changed from PIN 0 to PIN 25
-     PinBuzzer = 45;   // same as user LED !!
+     PinBuzzer = 45; // same as user LED !!
   } else {
      // not enough analog Input pins !!!
      // most are already occupied by E-Ink
-     //PinWindDir = 17;
-     //PinWindSpeed = 48;    
+     AnemometerPin = {17,48,-1}; //WindDir, WindSpeed, RainGauge
      PinOneWire = 17; //pin for one-Wire  DS18B20
     }
 
-    //e-ink
-    PinEink_Busy   =  6;
-    PinEink_Rst    =  5;
-    PinEink_Dc     =  4;
-    PinEink_Cs     =  3;
-    PinEink_Clk    =  2;
-    PinEink_Din    =  1;   // = MOSI
-
+    EInkPin = {6,5,4,3,2,1}; //busy, rst, dc, cs, clk, din
+   
     pinMode(18,OUTPUT);
     digitalWrite(18,HIGH); //switch on power for EInk
 
     pinMode(45,OUTPUT);
     digitalWrite(45,LOW); //switch user-LED off
 
-//    PinExtPower = 18;   //pin for external Voltage-control
-    PinADCCtrl = 46;    //pin for reading battery-voltage 
-    PinADCVoltage = 7;  // pin for analog input reading battery-voltage 
+//    PowerPin.ExtPower = 18;   //pin for external Voltage-control
+    PowerPin = {-1,-1,46,7}; //ExtPower, ExtPowerOnOff, ADCCtrl = pin for reading battery-voltage, ADCVoltage = pin for analog input reading battery-voltage  
     // Voltage divider 390k and 100K
     adcVoltageMultiplier =  5.5113;
     #endif
@@ -2601,13 +2341,13 @@ bool connectModem(){
 
 bool factoryResetModem(){
   //reset modem
-  if (PinGsmRst >= 0){
+  if (GSMPin.Rst >= 0){
     log_i("reset modem");
-    digitalWrite(PinGsmRst,HIGH);
+    digitalWrite(GSMPin.Rst,HIGH);
     delay(100);
-    digitalWrite(PinGsmRst,LOW);
+    digitalWrite(GSMPin.Rst,LOW);
     delay(1200);
-    digitalWrite(PinGsmRst,HIGH);
+    digitalWrite(GSMPin.Rst,HIGH);
     delay(6000); //wait until modem is ok now
   }  
   log_i("test modem-connection");
@@ -2629,7 +2369,7 @@ bool factoryResetModem(){
 
 bool TestModemconnection(unsigned long baud){
   log_i("Modem switch baudrate to %d",baud);
-  GsmSerial.begin(baud,SERIAL_8N1,PinGsmRx,PinGsmTx,false); //baud, config, rx, tx, invert
+  GsmSerial.begin(baud,SERIAL_8N1,GSMPin.Rx,GSMPin.Tx,false); //baud, config, rx, tx, invert
   log_i("test modem connection");
   if (modem.testAT()){
     status.gsm.baud = baud; //set baudrate in status
@@ -2643,13 +2383,13 @@ bool TestModemconnection(unsigned long baud){
 bool initModem(){
   //reset modem
   command.getGpsPos = 0;
-  if (PinGsmRst >= 0){
+  if (GSMPin.Rst >= 0){
     log_i("reset modem");
-    digitalWrite(PinGsmRst,HIGH);
+    digitalWrite(GSMPin.Rst,HIGH);
     delay(100);
-    digitalWrite(PinGsmRst,LOW);
+    digitalWrite(GSMPin.Rst,LOW);
     delay(1200);
-    digitalWrite(PinGsmRst,HIGH);
+    digitalWrite(GSMPin.Rst,HIGH);
     delay(3000); //wait until modem is ok now
   }
   #if defined(TINY_GSM_MODEM_SIM7000) || defined(TINY_GSM_MODEM_SIM7080)
@@ -2686,7 +2426,7 @@ bool initModem(){
   if (status.gsm.baud != GSM_MAX_BAUD){
     log_i("GSM-Modem switch baudrate to %d",GSM_MAX_BAUD);
     modem.setBaud(GSM_MAX_BAUD); //set Baudrate to 921600
-    GsmSerial.begin(GSM_MAX_BAUD,SERIAL_8N1,PinGsmRx,PinGsmTx,false); //baud, config, rx, tx, invert
+    GsmSerial.begin(GSM_MAX_BAUD,SERIAL_8N1,GSMPin.Rx,GSMPin.Tx,false); //baud, config, rx, tx, invert
     status.gsm.baud = GSM_MAX_BAUD;
   }
   //readModem2Serial("AT+COPS=?\r\n",50000);
@@ -2749,19 +2489,19 @@ void PowerOffModem(){
         modem.sendAT(GF("+CSCLK=2"));
         delay(1000);
       #endif
-      if (PinGsmRst >= 0){
-        pinMode(PinGsmRst,INPUT); //switch to input, so it is floating        
+      if (GSMPin.Rst >= 0){
+        pinMode(GSMPin.Rst,INPUT); //switch to input, so it is floating        
         /*
         #if defined(TINY_GSM_MODEM_SIM7080)
           
         #else
-          digitalWrite(PinGsmRst,LOW);
+          digitalWrite(GSMPin.Rst,LOW);
         #endif
         */
       }      
-      if (PinGsmPower >= 0){
+      if (GSMPin.Power >= 0){
         // Turn off the Modem power first
-        digitalWrite(PinGsmPower, LOW);
+        digitalWrite(GSMPin.Power, LOW);
       }
       xSemaphoreGive( xGsmMutex );
       break;
@@ -2783,17 +2523,17 @@ void setupSim7000Gps(){
 #endif
 
 void taskGsm(void *pvParameters){  
-  if (PinGsmPower >= 0){
-    pinMode(PinGsmPower, OUTPUT);
+  if (GSMPin.Power >= 0){
+    pinMode(GSMPin.Power, OUTPUT);
     // Turn on the Modem power first
-    digitalWrite(PinGsmPower, HIGH);
+    digitalWrite(GSMPin.Power, HIGH);
   }
-  if (PinGsmRst >= 0){
-    pinMode(PinGsmRst, OUTPUT); //set GsmReset to output
-    digitalWrite(PinGsmRst,HIGH);
+  if (GSMPin.Rst >= 0){
+    pinMode(GSMPin.Rst, OUTPUT); //set GsmReset to output
+    digitalWrite(GSMPin.Rst,HIGH);
   }
   status.gsm.sOperator = ""; 
-  GsmSerial.begin(115200,SERIAL_8N1,PinGsmRx,PinGsmTx,false); //baud, config, rx, tx, invert
+  GsmSerial.begin(115200,SERIAL_8N1,GSMPin.Rx,GSMPin.Tx,false); //baud, config, rx, tx, invert
   //const TickType_t xDelay = 60000 / portTICK_PERIOD_MS;   //only every 60sek.
   //TickType_t xLastWakeTime = xTaskGetTickCount (); //get actual tick-count
   //bool status;
@@ -3051,11 +2791,11 @@ void taskWeather(void *pvParameters){
   Windy::wData wiData;
   weatherAvg avg[2];
   bool bFirstWData = false;
-  pI2cZero->begin(PinBaroSDA,PinBaroSCL,200000u); //init i2c
+  pI2cZero->begin(BaroPin.SDA,BaroPin.SCL,200000u); //init i2c
   Weather weather;
   weather.setTempOffset(setting.wd.tempOffset);
   weather.setWindDirOffset(setting.wd.windDirOffset);
-  if (!weather.begin(pI2cZero,setting,PinOneWire,PinWindDir,PinWindSpeed,PinRainGauge)){
+  if (!weather.begin(pI2cZero,setting,PinOneWire,AnemometerPin.WindDir,AnemometerPin.WindSpeed,AnemometerPin.RainGauge)){
   
   }
   if ((!setting.wd.mode.bits.enable) && (!status.bWUBroadCast)){
@@ -3352,7 +3092,7 @@ void taskBaro(void *pvParameters){
   #ifdef S3CORE
   uint8_t baroSensor = baro.begin(pI2cOne,&xI2C1Mutex);
   #else
-  pI2cZero->begin(PinBaroSDA,PinBaroSCL,400000u); //init i2c
+  pI2cZero->begin(BaroPin.SDA,BaroPin.SCL,400000u); //init i2c
   uint8_t baroSensor = baro.begin(pI2cZero,&xI2C0Mutex);
   #endif
   baro.setKalmanSettings(setting.vario.sigmaP,setting.vario.sigmaA);
@@ -3561,13 +3301,13 @@ float readBattvoltage(){
   const byte NO_OF_SAMPLES = 5;
   uint32_t adc_reading = 0;
   float vBatt = 0.0;
-  if (PinADCVoltage < 0){
+  if (PowerPin.ADCVoltage < 0){
     return 0.0; //not voltage-pin defined !!
   }
 
-  analogRead(PinADCVoltage); // First measurement has the biggest difference on my board, this line just skips the first measurement
+  analogRead(PowerPin.ADCVoltage); // First measurement has the biggest difference on my board, this line just skips the first measurement
   for (int i = 0; i < NO_OF_SAMPLES; i++) {
-    uint16_t thisReading = analogRead(PinADCVoltage);
+    uint16_t thisReading = analogRead(PowerPin.ADCVoltage);
     adc_reading += thisReading;
   }
   adc_reading /= NO_OF_SAMPLES;
@@ -4298,7 +4038,7 @@ bool sendCmd2NMEA(const char* s,const char* sRet){
 bool setupQuectelGps(void){
   log_i("************ config GPS *************");
   checkGPSBaudrates();
-  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,PinGPSRX,PinGPSTX,false); //reinit TX-Pin, cause it is used twice
+  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GSMPin.Rx,GpsPin.Tx,false); //reinit TX-Pin, cause it is used twice
   bool bOk = false;
   char sQuery[20];
   sprintf(sQuery,"$PQVERNO,R");
@@ -4335,7 +4075,7 @@ bool setupUbloxConfig(){
   
   checkGPSBaudrates();
   SFE_UBLOX_GNSS ublox;
-  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,PinGPSRX,PinGPSTX,false); //reinit TX-Pin, cause maybe it is used twice
+  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GSMPin.Rx,GpsPin.Tx,false); //reinit TX-Pin, cause maybe it is used twice
   ublox.begin(NMeaSerial);
   ublox.factoryReset();
 
@@ -4541,7 +4281,7 @@ void taskStandard(void *pvParameters){
   #ifdef TEST
   static uint32_t tSend = millis();
   #endif
-  userled.setUserLed(PinBeaconLed,true);
+  userled.setUserLed(LedPin.Beacon,true);
   char * pSerialLine = NULL;
   String sSerial = "";
   String s = "";
@@ -4572,9 +4312,9 @@ void taskStandard(void *pvParameters){
   }  
 
   #ifdef AIRMODULE
-  if (PinGPSRX >= 0){
-    NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,PinGPSRX,-1,false); //clear Tx-Pin, cause maybe it is used twice
-    log_i("GPS Baud=%d,8N1,RX=%d,TX=%d",setting.gps.Baud,PinGPSRX,PinGPSTX);
+  if (GSMPin.Rx >= 0){
+    NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GSMPin.Rx,-1,false); //clear Tx-Pin, cause maybe it is used twice
+    log_i("GPS Baud=%d,8N1,RX=%d,TX=%d",setting.gps.Baud,GSMPin.Rx,GpsPin.Tx);
     delay(2000); //wait 1 second until power is stable
     checkGPSBaudrates();
     //clear serial buffer
@@ -4584,20 +4324,20 @@ void taskStandard(void *pvParameters){
     //sendCmd2NMEA("$PMTK353,1,0,1,0,0","$PMTK001,353,3,1,0,1,0,0,13*07"); //enable GPS & Galileo
   }
   
-  if (PinPPS > 0){  
+  if (GpsPin.PPS > 0){  
     //only on new boards we have an pps-pin
     log_i("setup PPS-Pin for GPS");
-    pinMode(PinPPS, INPUT);
-    //attachInterrupt(digitalPinToInterrupt(PinPPS), ppsHandler, FALLING);
-    attachInterrupt(digitalPinToInterrupt(PinPPS), ppsHandler, RISING);
+    pinMode(GpsPin.PPS, INPUT);
+    //attachInterrupt(digitalPinToInterrupt(GpsPin.PPS), ppsHandler, FALLING);
+    attachInterrupt(digitalPinToInterrupt(GpsPin.PPS), ppsHandler, RISING);
   }
   #ifdef GXTEST
     status.gps.bExtGps = true;
     fanet.setGPS(true);
     //only on new boards we have an pps-pin
-    pinMode(PinPPS, INPUT);
-    //attachInterrupt(digitalPinToInterrupt(PinPPS), ppsHandler, FALLING);
-    attachInterrupt(digitalPinToInterrupt(PinPPS), ppsHandler, RISING);
+    pinMode(GpsPin.PPS, INPUT);
+    //attachInterrupt(digitalPinToInterrupt(GpsPin.PPS), ppsHandler, FALLING);
+    attachInterrupt(digitalPinToInterrupt(GpsPin.PPS), ppsHandler, RISING);
   #endif
   #endif
   // create a binary semaphore for task synchronization
@@ -4614,7 +4354,7 @@ void taskStandard(void *pvParameters){
     fmac.setAddr(strtol(setting.myDevId.c_str(), NULL, 16));
   }
 
-  fanet.begin(PinLora_SCK, PinLora_MISO, PinLora_MOSI, PinLora_SS,PinLoraRst, PinLoraDI0,PinLoraGPIO,frequency,setting.FrqCor,14,radioChip);
+  fanet.begin(LoraPin._SCK, LoraPin._MISO, LoraPin._MOSI, LoraPin._SS,LoraPin.Rst, LoraPin.DI0,LoraPin.GPIO,frequency,setting.FrqCor,14,radioChip);
   fanet.setGPS(status.gps.bHasGPS);
   #ifdef GSMODULE
   if (setting.Mode == eMode::GROUND_STATION){
@@ -5035,7 +4775,7 @@ void taskStandard(void *pvParameters){
     if (setting.outputModeVario == eOutputVario::OVARIO_LXPW) sendLXPW(tAct); //not output 
     #ifdef AIRMODULE
     if ((setting.Mode == eMode::AIR_MODULE) || ((abs(setting.gs.lat) <= 0.1) && (abs(setting.gs.lon) <= 0.1))){ //in GS-Mode we use the GPS, if in settings disabled
-      if ((PinPPS < 0) && (!status.gps.bExtGps)){
+      if ((GpsPin.PPS < 0) && (!status.gps.bExtGps)){
         if ((tAct - tOldPPS) >= 1000){
           gtPPS = millis();
           ppsTriggered = true;
@@ -5169,7 +4909,7 @@ void taskStandard(void *pvParameters){
         status.gps.hdop = 0;
       }
     }else{
-      if ((PinPPS < 0) && (!status.gps.bExtGps)){
+      if ((GpsPin.PPS < 0) && (!status.gps.bExtGps)){
         if ((tAct - tOldPPS) >= 1000){
           gtPPS = millis();
           ppsTriggered = true;
@@ -5289,19 +5029,19 @@ void powerOff(){
   }
   #endif
 
-  if (PinUserLed >= 0){
-    pinMode(PinUserLed, OUTPUT);
-    digitalWrite(PinUserLed,HIGH); 
+  if (LedPin.User >= 0){
+    pinMode(LedPin.User, OUTPUT);
+    digitalWrite(LedPin.User,HIGH); 
   }
   if (PinBuzzer >= 0){
     digitalWrite(PinBuzzer,LOW);     
   }  
-  if (PinBeaconLed >= 0){
-    digitalWrite(PinBeaconLed,LOW);    
+  if (LedPin.Beacon >= 0){
+    digitalWrite(LedPin.Beacon,LOW);    
   }
-  if (PinExtPower >= 0){
-    digitalWrite(PinExtPower,HIGH);
-    //pinMode(PinExtPower,INPUT); //set ext-power-pin to input (if low --> ext-power is enabled)  
+  if (PowerPin.ExtPower >= 0){
+    digitalWrite(PowerPin.ExtPower,HIGH);
+    //pinMode(PowerPin.ExtPower,INPUT); //set ext-power-pin to input (if low --> ext-power is enabled)  
   }
   
   log_i("switch power-supply off");  
@@ -5321,7 +5061,7 @@ void powerOff(){
       PMU->shutdown(); //shutdown disables all power supply
     }
     xSemaphoreGive(*PMUMutex);
-  }else if ((sButton[0].PinButton >= 0) && (PinExtPowerOnOff < 0)){
+  }else if ((sButton[0].PinButton >= 0) && (PowerPin.ExtPowerOnOff < 0)){
     while (!digitalRead(sButton[0].PinButton)){
       log_i("wait until power-button is released");
       delay(500); //wait 500ms
@@ -5333,10 +5073,10 @@ void powerOff(){
       esp_sleep_enable_ext1_wakeup(mask,ESP_EXT1_WAKEUP_ANY_LOW); //wait until power is back again
     #endif
   }
-  if (PinExtPowerOnOff >= 0){
-    if (!digitalRead(PinExtPowerOnOff)){
+  if (PowerPin.ExtPowerOnOff >= 0){
+    if (!digitalRead(PowerPin.ExtPowerOnOff)){
       //pin has to be low, if not, somebody switched off with button !!
-      uint64_t mask = uint64_t(1) << uint64_t(PinExtPowerOnOff);
+      uint64_t mask = uint64_t(1) << uint64_t(PowerPin.ExtPowerOnOff);
       //uint64_t mask = 0x1000000000;
       esp_sleep_enable_ext1_wakeup(mask,ESP_EXT1_WAKEUP_ANY_HIGH); //wait until power is back again
     }
@@ -5352,12 +5092,12 @@ void powerOff(){
   #endif
   #endif
   #endif
-  if (PinLora_SCK >= 0) pinMode(PinLora_SCK,INPUT);
-  if (PinLoraRst >= 0) pinMode(PinLoraRst,INPUT);
-  if (PinLora_MISO >= 0) pinMode(PinLora_MISO,INPUT);
-  if (PinLora_MOSI>= 0) pinMode(PinLora_MOSI,INPUT);
-  if (PinLora_SS >= 0) pinMode(PinLora_SS,INPUT);
-  if (PinLoraDI0 >= 0) pinMode(PinLoraDI0,INPUT);
+  if (LoraPin._SCK >= 0) pinMode(LoraPin._SCK,INPUT);
+  if (LoraPin.Rst >= 0) pinMode(LoraPin.Rst,INPUT);
+  if (LoraPin._MISO >= 0) pinMode(LoraPin._MISO,INPUT);
+  if (LoraPin._MOSI>= 0) pinMode(LoraPin._MOSI,INPUT);
+  if (LoraPin._SS >= 0) pinMode(LoraPin._SS,INPUT);
+  if (LoraPin.DI0 >= 0) pinMode(LoraPin.DI0,INPUT);
   esp_deep_sleep_start();
   
 
@@ -5648,7 +5388,7 @@ void taskOled(void *pvParameters){
     return;
   }
   Oled display;
-  display.begin(pI2cOne,PinOledRst,&xI2C1Mutex);
+  display.begin(pI2cOne,OLEDPMUPin.Rst,&xI2C1Mutex);
   while(1){
     display.run();
     delay(10);
@@ -5669,12 +5409,12 @@ void taskEInk(void *pvParameters){
   }
   Screen screen;
   if (setting.displayType == EINK2_9_E290){
-    screen.begin(2,PinEink_Cs,PinEink_Dc,PinEink_Rst,PinEink_Busy,PinEink_Clk,PinEink_Din); //display-type 2
+    screen.begin(2,EInkPin.cs,EInkPin.dc,EInkPin.rst,EInkPin.busy,EInkPin.clk,EInkPin.din); //display-type 2
   }else{
     if (setting.displayType == EINK2_9_V2){
-      screen.begin(1,PinEink_Cs,PinEink_Dc,PinEink_Rst,PinEink_Busy,PinEink_Clk,PinEink_Din); //display-type 1
+      screen.begin(1,EInkPin.cs,EInkPin.dc,EInkPin.rst,EInkPin.busy,EInkPin.clk,EInkPin.din); //display-type 1
     }else{
-      screen.begin(0,PinEink_Cs,PinEink_Dc,PinEink_Rst,PinEink_Busy,PinEink_Clk,PinEink_Din);
+      screen.begin(0,EInkPin.cs,EInkPin.dc,EInkPin.rst,EInkPin.busy,EInkPin.clk,EInkPin.din);
     }  
   }
   while(1){
@@ -5691,8 +5431,8 @@ void taskEInk(void *pvParameters){
 
 void checkExtPowerOff(uint32_t tAct){
   static uint32_t tPowerOff = millis();
-  if (PinExtPowerOnOff > 0){
-    if (!digitalRead(PinExtPowerOnOff)){
+  if (PowerPin.ExtPowerOnOff > 0){
+    if (!digitalRead(PowerPin.ExtPowerOnOff)){
       if (timeOver(tAct,tPowerOff,500)){
         log_i("no external Power --> power-off");
         status.bPowerOff = true;
