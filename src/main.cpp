@@ -1867,9 +1867,145 @@ void setup() {
   testLegacy();
   #endif
 
+  setupGPIOPins();
+
+  for (uint8_t i = 0; i < NUMBUTTONS; i++) {
+    // initialize built-in LED as an output
+    if (sButton[i].PinButton >= 0){
+      //set pin for button as input
+      pinMode(sButton[i].PinButton, INPUT_PULLUP);
+      // initialize the corresponding AceButton
+      buttons[i].init(sButton[i].PinButton, HIGH, i);
+    }
+  }
+  // Configure the ButtonConfig with the event handler, and enable all higher
+  // level events.
+  ace_button::ButtonConfig* buttonConfig = ace_button::ButtonConfig::getSystemButtonConfig();
+  buttonConfig->setEventHandler(handleEvent);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureClick);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureDoubleClick);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureLongPress);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureRepeatPress);
+  buttonConfig->setDebounceDelay(20); //set debounce-delay to 20ms
+  buttonConfig->setLongPressDelay(1000); //set long-press-delay to 500ms
+  buttonConfig->setClickDelay(500); //set click-delay to 200ms
+
+  if (PinBeaconLed >= 0) {
+    pinMode(PinBeaconLed, OUTPUT);
+    digitalWrite(PinBeaconLed,LOW); 
+  }
+  if (PinUserLed >= 0){
+    pinMode(PinUserLed, OUTPUT);
+    digitalWrite(PinUserLed,HIGH); 
+  }
+  if (PinExtPowerOnOff >= 0){
+    pinMode(PinExtPowerOnOff, INPUT);
+    log_i("ext power-state=%d",digitalRead(PinExtPowerOnOff));
+  }
+  if (PinExtPower >= 0){
+    pinMode(PinExtPower, OUTPUT); //we have to set pin 21 to measure voltage of Battery
+    digitalWrite(PinExtPower,LOW); //set output to Low, so we can measure the voltage
+    log_i("set ext-power");
+    delay(500); //wait until devices are on
+  }
+  if (PinADCCtrl >= 0){
+    if (setting.boardType == eBoard::HELTEC_VISION_MASTER_E290) {
+      // on this board there is a transistor before the MOS-FET, so signal is inverted
+      pinMode(PinADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
+      digitalWrite(PinADCCtrl,HIGH); //set output to high, so we can measure the voltage  
+      log_i("set adcCtrl HIGH"); 
+     } else {  
+       pinMode(PinADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
+       digitalWrite(PinADCCtrl,LOW); //set output to Low, so we can measure the voltage  
+       log_i("set adcCtrl LOW"); 
+     }
+    delay(100); 
+  }
+  if (PinADCVoltage >= 0){
+    pinMode(PinADCVoltage, INPUT); //set pin ADC-Voltage as input
+  }
+
+  #ifdef GSMODULE
+  if (setting.Mode == eMode::GROUND_STATION){
+      if ((setting.gs.PowerSave == eGsPower::GS_POWER_BATT_LIFE) || (setting.gs.PowerSave == eGsPower::GS_POWER_SAFE)){
+      printBattVoltage(millis()); //read Battery-level
+      log_i("Batt %dV; %d%%",status.battery.voltage,status.battery.percent);
+      if ((status.battery.voltage >= BATTPINOK) && (status.battery.percent < (setting.minBattPercent + setting.restartBattPercent)) && (status.battery.percent < 80)){
+        //go again to sleep
+        printLocalTime();
+        log_i("batt-voltage to less (%d%%) --> going to sleep again for 60min.",status.battery.percent);
+        esp_sleep_enable_timer_wakeup((uint64_t)BATTSLEEPTIME * uS_TO_S_FACTOR); //set Timer for wakeup      
+        //esp_wifi_stop();        
+        #ifdef BLUETOOTH
+        log_i("disable bluetooth for power-saving");
+        stopBluetooth();
+        #endif
+        esp_deep_sleep_start();
+      }
+    }
+  }
+  #endif
+
+
+  // setting.myDevId = ""; //MyDevID is now stored on file because it's used together with the addressType
+#ifdef GSM_MODULE
+xGsmMutex = xSemaphoreCreateMutex();
+#endif
+
+xOutputMutex = xSemaphoreCreateMutex();
+
+  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+#ifdef AIRMODULE
+
+  if (setting.Mode == eMode::AIR_MODULE){
+
+    //adding logger task
+    #ifdef FLARMLOGGER
+      xTaskCreatePinnedToCore(taskLogger, "taskLogger", 6500, NULL, 4, &xHandleLogger, ARDUINO_RUNNING_CORE1); //background Logger
+    #endif
+    //#ifndef S3CORE  //still in progress
+    xTaskCreatePinnedToCore(taskBaro, "taskBaro", 6500, NULL, 9, &xHandleBaro, ARDUINO_RUNNING_CORE0); //high priority task
+    //#endif
+  }
+#endif  
+  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+  xTaskCreatePinnedToCore(taskStandard, "taskStandard", 6500, NULL, 10, &xHandleStandard, ARDUINO_RUNNING_CORE1); //standard task
+  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+
+#ifdef EINK
+  xTaskCreatePinnedToCore(taskEInk, "taskEInk", 6500, NULL, 8, &xHandleEInk, ARDUINO_RUNNING_CORE0); //background EInk
+#endif
+#if defined(SSD1306) || defined(SH1106G)
+xTaskCreatePinnedToCore(taskOled, "taskOled", 6500, NULL, 8, &xHandleOled, ARDUINO_RUNNING_CORE1); //background Oled
+#endif
+  xTaskCreatePinnedToCore(taskBackGround, "taskBackGround", 6500, NULL, 5, &xHandleBackground, ARDUINO_RUNNING_CORE1); //background task
+  #ifdef BLUETOOTH
+  xTaskCreatePinnedToCore(taskBluetooth, "taskBluetooth", 4096, NULL, 7, &xHandleBluetooth, ARDUINO_RUNNING_CORE1);
+  #endif
+
+#ifdef GSMODULE  
+  if (setting.Mode == eMode::GROUND_STATION){
+    if ((setting.WUUpload.enable) && (!setting.wd.mode.bits.enable)){
+      status.bWUBroadCast = true;
+      log_i("wu broadcast enabled");
+    }
+    if ((status.bWUBroadCast) || (setting.wd.mode.bits.enable)){
+      //start weather-task
+      xTaskCreatePinnedToCore(taskWeather, "taskWeather", 13000, NULL, 8, &xHandleWeather, ARDUINO_RUNNING_CORE1);
+    }
+  }
+#endif  
+#ifdef GSM_MODULE
+  //start Gsm-task
+  xTaskCreatePinnedToCore(taskGsm, "taskGsm", 4096, NULL, 3, &xHandleGsm, ARDUINO_RUNNING_CORE1);
+#endif
+}
+
+void setupGPIOPins()
+{
   switch (setting.boardType)
   {
-  case eBoard::T_BEAM: 
+    case eBoard::T_BEAM: 
     log_i("Board=T_BEAM");
     PinGPSRX = 34;
     PinGPSTX = 12;
@@ -1888,7 +2024,6 @@ void setup() {
 
     PinBaroSDA = 13;
     PinBaroSCL = 14;
-
     
     PinUserLed = 4;
 
@@ -2042,7 +2177,6 @@ void setup() {
     PinGPSRX = 12;
     //PinGPSTX = 15; // no GPS-TX
 
-
     PinLoraRst = 14;
     PinLoraDI0 = 26;
     PinLora_SS = 18;
@@ -2074,14 +2208,11 @@ void setup() {
     #ifdef GXTEST
       PinPPS = 37;
     #endif
-
     
     if (setting.bHasFuelSensor){
       PinFuelSensor = 39;
       pinMode(PinFuelSensor, INPUT);
     }    
-
-
 
     sButton[0].PinButton = 0; //pin for program-Led
     //PinButton[0] = 0; //pin for Program-Led
@@ -2350,6 +2481,8 @@ void setup() {
     break;
 
     case eBoard::HELTEC_VISION_MASTER_E290:
+    
+    #ifdef VISIONMASTER_E290
     log_i("Board=Vision Master E290");
     sButton[0].PinButton = 0; //pin for program-button
     PinLoraRst = 12;
@@ -2366,16 +2499,16 @@ void setup() {
     pI2cOne->begin(PinBaroSDA, PinBaroSCL);
 
     if (setting.Mode==AIR_MODULE) {
-     PinGPSRX = 47;
-     PinGPSTX = 48;
+     PinGPSRX = 48;// TX = Greeen
+     PinGPSTX = 47;// RX = White
      PinPPS =17;
      //V3.0.0 changed from PIN 0 to PIN 25
      PinBuzzer = 45;   // same as user LED !!
   } else {
      // not enough analog Input pins !!!
      // most are already occupied by E-Ink
-     PinWindDir = 17;
-     PinWindSpeed = 48;    
+     //PinWindDir = 17;
+     //PinWindSpeed = 48;    
      PinOneWire = 17; //pin for one-Wire  DS18B20
     }
 
@@ -2398,6 +2531,7 @@ void setup() {
     PinADCVoltage = 7;  // pin for analog input reading battery-voltage 
     // Voltage divider 390k and 100K
     adcVoltageMultiplier =  5.5113;
+    #endif
     break;
   case eBoard::UNKNOWN:
     log_e("unknown Board --> please correct");
@@ -2409,138 +2543,6 @@ void setup() {
     delay(1000);
     esp_restart(); //we need to restart    break;
   }
-
-  for (uint8_t i = 0; i < NUMBUTTONS; i++) {
-    // initialize built-in LED as an output
-    if (sButton[i].PinButton >= 0){
-      //set pin for button as input
-      pinMode(sButton[i].PinButton, INPUT_PULLUP);
-      // initialize the corresponding AceButton
-      buttons[i].init(sButton[i].PinButton, HIGH, i);
-    }
-  }
-  // Configure the ButtonConfig with the event handler, and enable all higher
-  // level events.
-  ace_button::ButtonConfig* buttonConfig = ace_button::ButtonConfig::getSystemButtonConfig();
-  buttonConfig->setEventHandler(handleEvent);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureClick);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureDoubleClick);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureLongPress);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureRepeatPress);
-  buttonConfig->setDebounceDelay(20); //set debounce-delay to 20ms
-  buttonConfig->setLongPressDelay(1000); //set long-press-delay to 500ms
-  buttonConfig->setClickDelay(500); //set click-delay to 200ms
-
-
-  if (PinBeaconLed >= 0) {
-    pinMode(PinBeaconLed, OUTPUT);
-    digitalWrite(PinBeaconLed,LOW); 
-  }
-  if (PinUserLed >= 0){
-    pinMode(PinUserLed, OUTPUT);
-    digitalWrite(PinUserLed,HIGH); 
-  }
-  if (PinExtPowerOnOff >= 0){
-    pinMode(PinExtPowerOnOff, INPUT);
-    log_i("ext power-state=%d",digitalRead(PinExtPowerOnOff));
-  }
-  if (PinExtPower >= 0){
-    pinMode(PinExtPower, OUTPUT); //we have to set pin 21 to measure voltage of Battery
-    digitalWrite(PinExtPower,LOW); //set output to Low, so we can measure the voltage
-    log_i("set ext-power");
-    delay(500); //wait until devices are on
-  }
-  if (PinADCCtrl >= 0){
-    if (setting.boardType == eBoard::HELTEC_VISION_MASTER_E290) {
-      // on this board there is a transistor before the MOS-FET, so signal is inverted
-      pinMode(PinADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
-      digitalWrite(PinADCCtrl,HIGH); //set output to high, so we can measure the voltage  
-      log_i("set adcCtrl HIGH"); 
-     } else {  
-       pinMode(PinADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
-       digitalWrite(PinADCCtrl,LOW); //set output to Low, so we can measure the voltage  
-       log_i("set adcCtrl LOW"); 
-     }
-    delay(100); 
-  }
-  if (PinADCVoltage >= 0){
-    pinMode(PinADCVoltage, INPUT); //set pin ADC-Voltage as input
-  }
-
-  #ifdef GSMODULE
-  if (setting.Mode == eMode::GROUND_STATION){
-      if ((setting.gs.PowerSave == eGsPower::GS_POWER_BATT_LIFE) || (setting.gs.PowerSave == eGsPower::GS_POWER_SAFE)){
-      printBattVoltage(millis()); //read Battery-level
-      log_i("Batt %dV; %d%%",status.battery.voltage,status.battery.percent);
-      if ((status.battery.voltage >= BATTPINOK) && (status.battery.percent < (setting.minBattPercent + setting.restartBattPercent)) && (status.battery.percent < 80)){
-        //go again to sleep
-        printLocalTime();
-        log_i("batt-voltage to less (%d%%) --> going to sleep again for 60min.",status.battery.percent);
-        esp_sleep_enable_timer_wakeup((uint64_t)BATTSLEEPTIME * uS_TO_S_FACTOR); //set Timer for wakeup      
-        //esp_wifi_stop();        
-        #ifdef BLUETOOTH
-        log_i("disable bluetooth for power-saving");
-        stopBluetooth();
-        #endif
-        esp_deep_sleep_start();
-      }
-    }
-  }
-  #endif
-
-
-  // setting.myDevId = ""; //MyDevID is now stored on file because it's used together with the addressType
-#ifdef GSM_MODULE
-xGsmMutex = xSemaphoreCreateMutex();
-#endif
-
-xOutputMutex = xSemaphoreCreateMutex();
-
-  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
-#ifdef AIRMODULE
-
-  if (setting.Mode == eMode::AIR_MODULE){
-
-    //adding logger task
-    #ifdef FLARMLOGGER
-      xTaskCreatePinnedToCore(taskLogger, "taskLogger", 6500, NULL, 4, &xHandleLogger, ARDUINO_RUNNING_CORE1); //background Logger
-    #endif
-    //#ifndef S3CORE  //still in progress
-    xTaskCreatePinnedToCore(taskBaro, "taskBaro", 6500, NULL, 9, &xHandleBaro, ARDUINO_RUNNING_CORE1); //high priority task
-    //#endif
-  }
-#endif  
-  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
-  xTaskCreatePinnedToCore(taskStandard, "taskStandard", 6500, NULL, 10, &xHandleStandard, ARDUINO_RUNNING_CORE1); //standard task
-  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
-
-#ifdef EINK
-  xTaskCreatePinnedToCore(taskEInk, "taskEInk", 6500, NULL, 8, &xHandleEInk, ARDUINO_RUNNING_CORE1); //background EInk
-#endif
-#if defined(SSD1306) || defined(SH1106G)
-xTaskCreatePinnedToCore(taskOled, "taskOled", 6500, NULL, 8, &xHandleOled, ARDUINO_RUNNING_CORE1); //background Oled
-#endif
-  xTaskCreatePinnedToCore(taskBackGround, "taskBackGround", 6500, NULL, 5, &xHandleBackground, ARDUINO_RUNNING_CORE1); //background task
-  #ifdef BLUETOOTH
-  xTaskCreatePinnedToCore(taskBluetooth, "taskBluetooth", 4096, NULL, 7, &xHandleBluetooth, ARDUINO_RUNNING_CORE1);
-  #endif
-
-#ifdef GSMODULE  
-  if (setting.Mode == eMode::GROUND_STATION){
-    if ((setting.WUUpload.enable) && (!setting.wd.mode.bits.enable)){
-      status.bWUBroadCast = true;
-      log_i("wu broadcast enabled");
-    }
-    if ((status.bWUBroadCast) || (setting.wd.mode.bits.enable)){
-      //start weather-task
-      xTaskCreatePinnedToCore(taskWeather, "taskWeather", 13000, NULL, 8, &xHandleWeather, ARDUINO_RUNNING_CORE1);
-    }
-  }
-#endif  
-#ifdef GSM_MODULE
-  //start Gsm-task
-  xTaskCreatePinnedToCore(taskGsm, "taskGsm", 4096, NULL, 3, &xHandleGsm, ARDUINO_RUNNING_CORE1);
-#endif
 }
 
 
@@ -4316,11 +4318,7 @@ bool setupQuectelGps(void){
   sendCmd2NMEA("$PMTK353,1,1,0,0,0","$PMTK001,353,3"); //enable GPS & Glonass
   //sendCmd2NMEA("$PMTK353,1,0,0,0,0","$PMTK001,353,3,1,0,0,0,0,1*35"); //enable GPS
   sendCmd2NMEA("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0","$PMTK001,314,3"); //set nmea-output to GPRMC and GPGGA
-  //sendCmd2NMEA("$PMTK225,0*2B","$PMTK001,225,3*35"); //power save mode normal mode
-
-  //sendCmd2NMEA("$PMTK605*31",""); //read Firmware
-  //sendCmd2NMEA("$PMTK104*37",""); //factory settings
-  //sendCmd2NMEA("$PMTK251,9600",""); //set Baudrate to 9600
+  //sendCmd2NMEA("$PMTK225,0*2B","$PMTK001,225,3*35"); //power save mode normal mode 
   log_i("update Baudrate to %d",GPSBAUDRATE);
   char chs[20];
   sprintf(chs,"$PMTK251,%d",GPSBAUDRATE);    
@@ -4334,6 +4332,8 @@ bool setupQuectelGps(void){
 }
 
 bool setupUbloxConfig(){
+  
+  checkGPSBaudrates();
   SFE_UBLOX_GNSS ublox;
   NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,PinGPSRX,PinGPSTX,false); //reinit TX-Pin, cause maybe it is used twice
   ublox.begin(NMeaSerial);
