@@ -1644,294 +1644,6 @@ void readPGXCFSentence(const char* data)
   ESP.restart();
 }
 
-void setup() {
-
-  Serial.begin(115200);
-  status.restart.doRestart = false;
-  status.bPowerOff = false;
-  status.bWUBroadCast = false;
-  status.bInternetConnected = false;
-  status.bTimeOk = false;
-  status.modemstatus = eConnectionState::DISCONNECTED;
-  status.bWifiOn = false;
-  command.ConfigGPS = 0;
-  status.gps.bHasGPS = false;
-  fanet.setGPS(false);
-  status.tRestart = 0;
-  sMqttState[0] = 0; //zero-Termination of String !
-  status.MqttStat = 0;
-  status.gps.Date[0] = 0; //clear string
-  status.gps.Time[0] = 0; //clear string
-  xI2C0Mutex = xSemaphoreCreateMutex(); // create Mutex for I2C0
-  xI2C1Mutex = xSemaphoreCreateMutex(); // create Mutex for I2C1
-  log_i("SDK-Version=%s",ESP.getSdkVersion());
-  log_i("CPU-Speed=%dMHz",getCpuFrequencyMhz());
-  log_i("XTAL-Freq=%dMHz",getXtalFrequencyMhz());
-  log_i("APB-Freq=%dHz",getApbFrequency());
-  log_i("Total heap: %d", ESP.getHeapSize());
-  log_i("Free heap: %d", ESP.getFreeHeap());
-  log_i("size of long %d",sizeof(long));
-  //function takes the following frequencies as valid values:
-  //  240, 160, 80    <<< For all XTAL types
-  //  40, 20, 10      <<< For 40MHz XTAL
-  //  26, 13          <<< For 26MHz XTAL
-  //  24, 12          <<< For 24MHz XTAL
-  #ifdef BOARD_HAS_PSRAM
-  if (psramFound()){
-    psRamSize = ESP.getPsramSize();
-    log_i("Total PSRAM: %d", psRamSize);
-    log_i("Free PSRAM: %d", ESP.getFreePsram());
-  }else{
-    psRamSize = 0;
-    log_i("No PSRAM found");
-  }
-  #endif
-  printChipInfo();
-  log_i("compiled at %s",compile_date.c_str());
-  log_i("current free heap: %d, minimum ever free heap: %d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
-
-  //esp_sleep_wakeup_cause_t reason = print_wakeup_reason(); //print reason for wakeup
-  esp_sleep_wakeup_cause_t reason2 = print_wakeup_reason(); //print reason for wakeup
-  //esp_reset_reason_t reason = esp_reset_reason();
-  // Make sure we can read the file system
-  if( !SPIFFS.begin(true)){
-  //if( !SPIFFS.begin(false)){
-    log_e("Error mounting SPIFFS");
-    //while(1);
-  }
-  log_i("SPIFFS total=%d used=%d free=%d",SPIFFS.totalBytes(),SPIFFS.usedBytes(),SPIFFS.totalBytes()-SPIFFS.usedBytes());
-  if (SPIFFS.usedBytes() == 0){
-    log_e("SPIFFS empty");
-  }
-  //listSpiffsFiles();
-  load_configFile(&setting); //load configuration
-  //setting.RFMode = setting.RFMode & 0x03; //only FANET allowed !!
-  //setting.wifi.connect = eWifiMode::CONNECT_NONE;
-  #ifdef GSM_MODULE
-  //minimum cpu-frequency is here 80Mhz cause of GSM-Module
-  if (setting.CPUFrequency <  80){
-    setting.CPUFrequency = 80;
-  }
-  #else
-  if (setting.CPUFrequency <  10){
-    setting.CPUFrequency = 10;
-  }  
-  #endif
-  //setting.boardType = eBoard::UNKNOWN;
-  #ifdef S3CORE
-    setting.boardType = T_BEAM_S3CORE;
-  #endif
-  #ifdef WIRELESS_STICK_V3
-    setting.boardType = HELTEC_WIRELESS_STICK_LITE_V3;
-  #endif
-  #ifdef Heltec_Lora_V3
-    setting.boardType = HELTEC_LORA_V3;
-  #endif
-  #ifdef VISIONMASTER_E290
-    setting.boardType = HELTEC_VISION_MASTER_E290;
-    setting.displayType = EINK2_9_E290;
-  #endif
-  if (setting.boardType == eBoard::UNKNOWN){
-    checkBoardType();
-  }  
-  /*
-  #if defined(OLED) && !defined(EINK)
-  setting.displayType = OLED0_96;
-  #elif defined(EINK) && !defined(OLED)
-  setting.displayType = EINK2_9;
-  #elif !defined(OLED) && !defined(EINK)
-  setting.displayType = NO_DISPLAY;
-  #endif
-  */
-  status.displayType = setting.displayType; //we have to copy the display-type in case, setting is changing
-  #if defined(GSMODULE)  && ! defined(AIRMODULE)
-    log_i("only GS-Mode compiled");
-    setting.Mode = eMode::GROUND_STATION;
-  #endif
-  #if defined(AIRMODULE) && ! defined(GSMODULE)
-    log_i("only Air-Mode compiled");
-    setting.Mode = eMode::AIR_MODULE;
-  #endif
-  status.gsm.bHasGSM = false;
-  #ifdef GSM_MODULE
-    status.gsm.bHasGSM = true;
-  #endif
-  #ifdef GSMODULE
-  if (setting.Mode == eMode::GROUND_STATION){
-    if ((reason2 == ESP_SLEEP_WAKEUP_TIMER) && (setting.gs.PowerSave == eGsPower::GS_POWER_SAFE)){
-      printLocalTime();
-      if (isDayTime() == 0){
-        log_i("not day --> enter deep-sleep");
-        uint32_t tSleep = calcSleepTime();
-        //log_i("time to sleep = %d",tSleep);
-        log_i("time to sleep = %d --> %02d:%02d:%02d",tSleep,tSleep/60/60,(tSleep/60)%60,(tSleep)%60);
-        esp_sleep_enable_timer_wakeup((uint64_t)tSleep * uS_TO_S_FACTOR); //set Timer for wakeup      
-        //esp_wifi_stop();
-        //#ifdef BLUETOOTH
-        //stopBluetooth();
-        //#endif
-        //adc_power_off();
-        //adc_power_release();
-        esp_deep_sleep_start();
-      }
-    }
-  }
-  #endif
-  if ((setting.wifi.ssid.length() <= 0) || (setting.wifi.password.length() <= 0)){
-    setting.wifi.connect = eWifiMode::CONNECT_NONE; //if no pw or ssid given --> don't connecto to wifi
-  }
-
-  //pinMode(BUTTON2, INPUT_PULLUP);
-
-  printSettings();
-  if (setting.wifi.connect == eWifiMode::CONNECT_ALWAYS){
-    log_i("set tWifiStop to 0 cause we have to be always connected");
-    setting.wifi.tWifiStop = 0; //no stop on wifi in case we connect always
-  }   
-  analogReadResolution(10); // Default of 12 is not very linear. Recommended to use 10 or 11 depending on needed resolution.
-  status.PMU = ePMU::NOPMU;
-  for (uint8_t i = 0; i < NUMBUTTONS; i++) {
-    //init buttons
-    sButton[i].PinButton = -1;
-  }
-
-  #ifdef TEST
-  testLegacy();
-  #endif
-
-  setupGPIOPins();
-
-  for (uint8_t i = 0; i < NUMBUTTONS; i++) {
-    // initialize built-in LED as an output
-    if (sButton[i].PinButton >= 0){
-      //set pin for button as input
-      pinMode(sButton[i].PinButton, INPUT_PULLUP);
-      // initialize the corresponding AceButton
-      buttons[i].init(sButton[i].PinButton, HIGH, i);
-    }
-  }
-  // Configure the ButtonConfig with the event handler, and enable all higher
-  // level events.
-  ace_button::ButtonConfig* buttonConfig = ace_button::ButtonConfig::getSystemButtonConfig();
-  buttonConfig->setEventHandler(handleEvent);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureClick);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureDoubleClick);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureLongPress);
-  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureRepeatPress);
-  buttonConfig->setDebounceDelay(20); //set debounce-delay to 20ms
-  buttonConfig->setLongPressDelay(1000); //set long-press-delay to 500ms
-  buttonConfig->setClickDelay(500); //set click-delay to 200ms
-
-  if (LedPin.Beacon >= 0) {
-    pinMode(LedPin.Beacon, OUTPUT);
-    digitalWrite(LedPin.Beacon,LOW); 
-  }
-  if (LedPin.User >= 0){
-    pinMode(LedPin.User, OUTPUT);
-    digitalWrite(LedPin.User,HIGH); 
-  }
-  if (PowerPin.ExtPowerOnOff >= 0){
-    pinMode(PowerPin.ExtPowerOnOff, INPUT);
-    log_i("ext power-state=%d",digitalRead(PowerPin.ExtPowerOnOff));
-  }
-  if (PowerPin.ExtPower >= 0){
-    pinMode(PowerPin.ExtPower, OUTPUT); //we have to set pin 21 to measure voltage of Battery
-    digitalWrite(PowerPin.ExtPower,LOW); //set output to Low, so we can measure the voltage
-    log_i("set ext-power");
-    delay(500); //wait until devices are on
-  }
-  if (PowerPin.ADCCtrl >= 0){
-    if (setting.boardType == eBoard::HELTEC_VISION_MASTER_E290) {
-      // on this board there is a transistor before the MOS-FET, so signal is inverted
-      pinMode(PowerPin.ADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
-      digitalWrite(PowerPin.ADCCtrl,HIGH); //set output to high, so we can measure the voltage  
-      log_i("set adcCtrl HIGH"); 
-     } else {  
-       pinMode(PowerPin.ADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
-       digitalWrite(PowerPin.ADCCtrl,LOW); //set output to Low, so we can measure the voltage  
-       log_i("set adcCtrl LOW"); 
-     }
-    delay(100); 
-  }
-  if (PowerPin.ADCVoltage >= 0){
-    pinMode(PowerPin.ADCVoltage, INPUT); //set pin ADC-Voltage as input
-  }
-
-  #ifdef GSMODULE
-  if (setting.Mode == eMode::GROUND_STATION){
-      if ((setting.gs.PowerSave == eGsPower::GS_POWER_BATT_LIFE) || (setting.gs.PowerSave == eGsPower::GS_POWER_SAFE)){
-      printBattVoltage(millis()); //read Battery-level
-      log_i("Batt %dV; %d%%",status.battery.voltage,status.battery.percent);
-      if ((status.battery.voltage >= BATTPINOK) && (status.battery.percent < (setting.minBattPercent + setting.restartBattPercent)) && (status.battery.percent < 80)){
-        //go again to sleep
-        printLocalTime();
-        log_i("batt-voltage to less (%d%%) --> going to sleep again for 60min.",status.battery.percent);
-        esp_sleep_enable_timer_wakeup((uint64_t)BATTSLEEPTIME * uS_TO_S_FACTOR); //set Timer for wakeup      
-        //esp_wifi_stop();        
-        #ifdef BLUETOOTH
-        log_i("disable bluetooth for power-saving");
-        stopBluetooth();
-        #endif
-        esp_deep_sleep_start();
-      }
-    }
-  }
-  #endif
-
-
-  // setting.myDevId = ""; //MyDevID is now stored on file because it's used together with the addressType
-#ifdef GSM_MODULE
-xGsmMutex = xSemaphoreCreateMutex();
-#endif
-
-xOutputMutex = xSemaphoreCreateMutex();
-
-  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
-#ifdef AIRMODULE
-
-  if (setting.Mode == eMode::AIR_MODULE){
-
-    //adding logger task
-    #ifdef FLARMLOGGER
-      xTaskCreatePinnedToCore(taskLogger, "taskLogger", 6500, NULL, 4, &xHandleLogger, ARDUINO_RUNNING_CORE1); //background Logger
-    #endif
-    //#ifndef S3CORE  //still in progress
-    xTaskCreatePinnedToCore(taskBaro, "taskBaro", 6500, NULL, 9, &xHandleBaro, ARDUINO_RUNNING_CORE0); //high priority task
-    //#endif
-  }
-#endif  
-  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
-  xTaskCreatePinnedToCore(taskStandard, "taskStandard", 6500, NULL, 10, &xHandleStandard, ARDUINO_RUNNING_CORE1); //standard task
-  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
-
-#ifdef EINK
-  xTaskCreatePinnedToCore(taskEInk, "taskEInk", 6500, NULL, 8, &xHandleEInk, ARDUINO_RUNNING_CORE0); //background EInk
-#endif
-#if defined(SSD1306) || defined(SH1106G)
-xTaskCreatePinnedToCore(taskOled, "taskOled", 6500, NULL, 8, &xHandleOled, ARDUINO_RUNNING_CORE1); //background Oled
-#endif
-  xTaskCreatePinnedToCore(taskBackGround, "taskBackGround", 6500, NULL, 5, &xHandleBackground, ARDUINO_RUNNING_CORE1); //background task
-  #ifdef BLUETOOTH
-  xTaskCreatePinnedToCore(taskBluetooth, "taskBluetooth", 4096, NULL, 7, &xHandleBluetooth, ARDUINO_RUNNING_CORE1);
-  #endif
-
-#ifdef GSMODULE  
-  if (setting.Mode == eMode::GROUND_STATION){
-    if ((setting.WUUpload.enable) && (!setting.wd.mode.bits.enable)){
-      status.bWUBroadCast = true;
-      log_i("wu broadcast enabled");
-    }
-    if ((status.bWUBroadCast) || (setting.wd.mode.bits.enable)){
-      //start weather-task
-      xTaskCreatePinnedToCore(taskWeather, "taskWeather", 13000, NULL, 8, &xHandleWeather, ARDUINO_RUNNING_CORE1);
-    }
-  }
-#endif  
-#ifdef GSM_MODULE
-  //start Gsm-task
-  xTaskCreatePinnedToCore(taskGsm, "taskGsm", 4096, NULL, 3, &xHandleGsm, ARDUINO_RUNNING_CORE1);
-#endif
-}
 
 void setupGPIOPins()
 {
@@ -2235,9 +1947,10 @@ void setupGPIOPins()
     #ifdef VISIONMASTER_E290
     log_i("Board=Vision Master E290");
     sButton[0].PinButton = 0; //pin for program-button
-    
+    sButton[1].PinButton = 21; //pin for mute/volume button
+
     LoraPin = {12,14,13,8,11,10,9}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
-    OLEDPMUPin = {21,17,18}; //Rst, SDA, SCL
+    OLEDPMUPin = {-1,-1,-1}; //Rst, SDA, SCL
     BaroPin = {39,38}; //SDA, SCL
 
     pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
@@ -2263,7 +1976,7 @@ void setupGPIOPins()
     pinMode(45,OUTPUT);
     digitalWrite(45,LOW); //switch user-LED off
 
-//    PowerPin.ExtPower = 18;   //pin for external Voltage-control
+    //PowerPin.ExtPower = 18;   //pin for external Voltage-control
     PowerPin = {-1,-1,46,7}; //ExtPower, ExtPowerOnOff, ADCCtrl = pin for reading battery-voltage, ADCVoltage = pin for analog input reading battery-voltage  
     // Voltage divider 390k and 100K
     adcVoltageMultiplier =  5.5113;
@@ -2279,6 +1992,297 @@ void setupGPIOPins()
     delay(1000);
     esp_restart(); //we need to restart    break;
   }
+}
+
+void setupGPIOPins(); // Function prototype declaration
+
+void setup() {
+
+  Serial.begin(115200);
+  status.restart.doRestart = false;
+  status.bPowerOff = false;
+  status.bWUBroadCast = false;
+  status.bInternetConnected = false;
+  status.bTimeOk = false;
+  status.modemstatus = eConnectionState::DISCONNECTED;
+  status.bWifiOn = false;
+  command.ConfigGPS = 0;
+  status.gps.bHasGPS = false;
+  fanet.setGPS(false);
+  status.tRestart = 0;
+  sMqttState[0] = 0; //zero-Termination of String !
+  status.MqttStat = 0;
+  status.gps.Date[0] = 0; //clear string
+  status.gps.Time[0] = 0; //clear string
+  xI2C0Mutex = xSemaphoreCreateMutex(); // create Mutex for I2C0
+  xI2C1Mutex = xSemaphoreCreateMutex(); // create Mutex for I2C1
+  log_i("SDK-Version=%s",ESP.getSdkVersion());
+  log_i("CPU-Speed=%dMHz",getCpuFrequencyMhz());
+  log_i("XTAL-Freq=%dMHz",getXtalFrequencyMhz());
+  log_i("APB-Freq=%dHz",getApbFrequency());
+  log_i("Total heap: %d", ESP.getHeapSize());
+  log_i("Free heap: %d", ESP.getFreeHeap());
+  log_i("size of long %d",sizeof(long));
+  //function takes the following frequencies as valid values:
+  //  240, 160, 80    <<< For all XTAL types
+  //  40, 20, 10      <<< For 40MHz XTAL
+  //  26, 13          <<< For 26MHz XTAL
+  //  24, 12          <<< For 24MHz XTAL
+  #ifdef BOARD_HAS_PSRAM
+  if (psramFound()){
+    psRamSize = ESP.getPsramSize();
+    log_i("Total PSRAM: %d", psRamSize);
+    log_i("Free PSRAM: %d", ESP.getFreePsram());
+  }else{
+    psRamSize = 0;
+    log_i("No PSRAM found");
+  }
+  #endif
+  printChipInfo();
+  log_i("compiled at %s",compile_date.c_str());
+  log_i("current free heap: %d, minimum ever free heap: %d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+
+  //esp_sleep_wakeup_cause_t reason = print_wakeup_reason(); //print reason for wakeup
+  esp_sleep_wakeup_cause_t reason2 = print_wakeup_reason(); //print reason for wakeup
+  //esp_reset_reason_t reason = esp_reset_reason();
+  // Make sure we can read the file system
+  if( !SPIFFS.begin(true)){
+  //if( !SPIFFS.begin(false)){
+    log_e("Error mounting SPIFFS");
+    //while(1);
+  }
+  log_i("SPIFFS total=%d used=%d free=%d",SPIFFS.totalBytes(),SPIFFS.usedBytes(),SPIFFS.totalBytes()-SPIFFS.usedBytes());
+  if (SPIFFS.usedBytes() == 0){
+    log_e("SPIFFS empty");
+  }
+  //listSpiffsFiles();
+  load_configFile(&setting); //load configuration
+  //setting.RFMode = setting.RFMode & 0x03; //only FANET allowed !!
+  //setting.wifi.connect = eWifiMode::CONNECT_NONE;
+  #ifdef GSM_MODULE
+  //minimum cpu-frequency is here 80Mhz cause of GSM-Module
+  if (setting.CPUFrequency <  80){
+    setting.CPUFrequency = 80;
+  }
+  #else
+  if (setting.CPUFrequency <  10){
+    setting.CPUFrequency = 10;
+  }  
+  #endif
+  //setting.boardType = eBoard::UNKNOWN;
+  #ifdef S3CORE
+    setting.boardType = T_BEAM_S3CORE;
+  #endif
+  #ifdef WIRELESS_STICK_V3
+    setting.boardType = HELTEC_WIRELESS_STICK_LITE_V3;
+  #endif
+  #ifdef Heltec_Lora_V3
+    setting.boardType = HELTEC_LORA_V3;
+  #endif
+  #ifdef VISIONMASTER_E290
+    setting.boardType = HELTEC_VISION_MASTER_E290;
+    setting.displayType = EINK2_9_E290;
+  #endif
+  if (setting.boardType == eBoard::UNKNOWN){
+    checkBoardType();
+  }  
+  /*
+  #if defined(OLED) && !defined(EINK)
+  setting.displayType = OLED0_96;
+  #elif defined(EINK) && !defined(OLED)
+  setting.displayType = EINK2_9;
+  #elif !defined(OLED) && !defined(EINK)
+  setting.displayType = NO_DISPLAY;
+  #endif
+  */
+  status.displayType = setting.displayType; //we have to copy the display-type in case, setting is changing
+  #if defined(GSMODULE)  && ! defined(AIRMODULE)
+    log_i("only GS-Mode compiled");
+    setting.Mode = eMode::GROUND_STATION;
+  #endif
+  #if defined(AIRMODULE) && ! defined(GSMODULE)
+    log_i("only Air-Mode compiled");
+    setting.Mode = eMode::AIR_MODULE;
+  #endif
+  status.gsm.bHasGSM = false;
+  #ifdef GSM_MODULE
+    status.gsm.bHasGSM = true;
+  #endif
+  #ifdef GSMODULE
+  if (setting.Mode == eMode::GROUND_STATION){
+    if ((reason2 == ESP_SLEEP_WAKEUP_TIMER) && (setting.gs.PowerSave == eGsPower::GS_POWER_SAFE)){
+      printLocalTime();
+      if (isDayTime() == 0){
+        log_i("not day --> enter deep-sleep");
+        uint32_t tSleep = calcSleepTime();
+        //log_i("time to sleep = %d",tSleep);
+        log_i("time to sleep = %d --> %02d:%02d:%02d",tSleep,tSleep/60/60,(tSleep/60)%60,(tSleep)%60);
+        esp_sleep_enable_timer_wakeup((uint64_t)tSleep * uS_TO_S_FACTOR); //set Timer for wakeup      
+        //esp_wifi_stop();
+        //#ifdef BLUETOOTH
+        //stopBluetooth();
+        //#endif
+        //adc_power_off();
+        //adc_power_release();
+        esp_deep_sleep_start();
+      }
+    }
+  }
+  #endif
+  if ((setting.wifi.ssid.length() <= 0) || (setting.wifi.password.length() <= 0)){
+    setting.wifi.connect = eWifiMode::CONNECT_NONE; //if no pw or ssid given --> don't connecto to wifi
+  }
+
+  //pinMode(BUTTON2, INPUT_PULLUP);
+
+  printSettings();
+  if (setting.wifi.connect == eWifiMode::CONNECT_ALWAYS){
+    log_i("set tWifiStop to 0 cause we have to be always connected");
+    setting.wifi.tWifiStop = 0; //no stop on wifi in case we connect always
+  }   
+  analogReadResolution(10); // Default of 12 is not very linear. Recommended to use 10 or 11 depending on needed resolution.
+  status.PMU = ePMU::NOPMU;
+  for (uint8_t i = 0; i < NUMBUTTONS; i++) {
+    //init buttons
+    sButton[i].PinButton = -1;
+  }
+
+  #ifdef TEST
+  testLegacy();
+  #endif
+
+  setupGPIOPins();
+
+  for (uint8_t i = 0; i < NUMBUTTONS; i++) {
+    // initialize built-in LED as an output
+    if (sButton[i].PinButton >= 0){
+      //set pin for button as input
+      pinMode(sButton[i].PinButton, INPUT_PULLUP);
+      // initialize the corresponding AceButton
+      buttons[i].init(sButton[i].PinButton, HIGH, i);
+    }
+  }
+  // Configure the ButtonConfig with the event handler, and enable all higher
+  // level events.
+  ace_button::ButtonConfig* buttonConfig = ace_button::ButtonConfig::getSystemButtonConfig();
+  buttonConfig->setEventHandler(handleEvent);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureClick);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureDoubleClick);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureLongPress);
+  buttonConfig->setFeature(ace_button::ButtonConfig::kFeatureRepeatPress);
+  buttonConfig->setDebounceDelay(20); //set debounce-delay to 20ms
+  buttonConfig->setLongPressDelay(1000); //set long-press-delay to 500ms
+  buttonConfig->setClickDelay(500); //set click-delay to 200ms
+
+  if (LedPin.Beacon >= 0) {
+    pinMode(LedPin.Beacon, OUTPUT);
+    digitalWrite(LedPin.Beacon,LOW); 
+  }
+  if (LedPin.User >= 0){
+    pinMode(LedPin.User, OUTPUT);
+    digitalWrite(LedPin.User,HIGH); 
+  }
+  if (PowerPin.ExtPowerOnOff >= 0){
+    pinMode(PowerPin.ExtPowerOnOff, INPUT);
+    log_i("ext power-state=%d",digitalRead(PowerPin.ExtPowerOnOff));
+  }
+  if (PowerPin.ExtPower >= 0){
+    pinMode(PowerPin.ExtPower, OUTPUT); //we have to set pin 21 to measure voltage of Battery
+    digitalWrite(PowerPin.ExtPower,LOW); //set output to Low, so we can measure the voltage
+    log_i("set ext-power");
+    delay(500); //wait until devices are on
+  }
+  if (PowerPin.ADCCtrl >= 0){
+    if (setting.boardType == eBoard::HELTEC_VISION_MASTER_E290) {
+      // on this board there is a transistor before the MOS-FET, so signal is inverted
+      pinMode(PowerPin.ADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
+      digitalWrite(PowerPin.ADCCtrl,HIGH); //set output to high, so we can measure the voltage  
+      log_i("set adcCtrl HIGH"); 
+     } else {  
+       pinMode(PowerPin.ADCCtrl, OUTPUT); //we have to set pin to measure voltage of Battery
+       digitalWrite(PowerPin.ADCCtrl,LOW); //set output to Low, so we can measure the voltage  
+       log_i("set adcCtrl LOW"); 
+     }
+    delay(100); 
+  }
+  if (PowerPin.ADCVoltage >= 0){
+    pinMode(PowerPin.ADCVoltage, INPUT); //set pin ADC-Voltage as input
+  }
+
+  #ifdef GSMODULE
+  if (setting.Mode == eMode::GROUND_STATION){
+      if ((setting.gs.PowerSave == eGsPower::GS_POWER_BATT_LIFE) || (setting.gs.PowerSave == eGsPower::GS_POWER_SAFE)){
+      printBattVoltage(millis()); //read Battery-level
+      log_i("Batt %dV; %d%%",status.battery.voltage,status.battery.percent);
+      if ((status.battery.voltage >= BATTPINOK) && (status.battery.percent < (setting.minBattPercent + setting.restartBattPercent)) && (status.battery.percent < 80)){
+        //go again to sleep
+        printLocalTime();
+        log_i("batt-voltage to less (%d%%) --> going to sleep again for 60min.",status.battery.percent);
+        esp_sleep_enable_timer_wakeup((uint64_t)BATTSLEEPTIME * uS_TO_S_FACTOR); //set Timer for wakeup      
+        //esp_wifi_stop();        
+        #ifdef BLUETOOTH
+        log_i("disable bluetooth for power-saving");
+        stopBluetooth();
+        #endif
+        esp_deep_sleep_start();
+      }
+    }
+  }
+  #endif
+
+
+  // setting.myDevId = ""; //MyDevID is now stored on file because it's used together with the addressType
+#ifdef GSM_MODULE
+xGsmMutex = xSemaphoreCreateMutex();
+#endif
+
+xOutputMutex = xSemaphoreCreateMutex();
+
+  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+#ifdef AIRMODULE
+
+  if (setting.Mode == eMode::AIR_MODULE){
+
+    //adding logger task
+    #ifdef FLARMLOGGER
+      xTaskCreatePinnedToCore(taskLogger, "taskLogger", 6500, NULL, 4, &xHandleLogger, ARDUINO_RUNNING_CORE1); //background Logger
+    #endif
+    //#ifndef S3CORE  //still in progress
+    xTaskCreatePinnedToCore(taskBaro, "taskBaro", 6500, NULL, 9, &xHandleBaro, ARDUINO_RUNNING_CORE0); //high priority task
+    //#endif
+  }
+#endif  
+  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+  xTaskCreatePinnedToCore(taskStandard, "taskStandard", 6500, NULL, 10, &xHandleStandard, ARDUINO_RUNNING_CORE1); //standard task
+  //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+
+#ifdef EINK
+  xTaskCreatePinnedToCore(taskEInk, "taskEInk", 6500, NULL, 8, &xHandleEInk, ARDUINO_RUNNING_CORE0); //background EInk
+#endif
+#if defined(SSD1306) || defined(SH1106G)
+xTaskCreatePinnedToCore(taskOled, "taskOled", 6500, NULL, 8, &xHandleOled, ARDUINO_RUNNING_CORE1); //background Oled
+#endif
+  xTaskCreatePinnedToCore(taskBackGround, "taskBackGround", 6500, NULL, 5, &xHandleBackground, ARDUINO_RUNNING_CORE1); //background task
+  #ifdef BLUETOOTH
+  xTaskCreatePinnedToCore(taskBluetooth, "taskBluetooth", 4096, NULL, 7, &xHandleBluetooth, ARDUINO_RUNNING_CORE1);
+  #endif
+
+#ifdef GSMODULE  
+  if (setting.Mode == eMode::GROUND_STATION){
+    if ((setting.WUUpload.enable) && (!setting.wd.mode.bits.enable)){
+      status.bWUBroadCast = true;
+      log_i("wu broadcast enabled");
+    }
+    if ((status.bWUBroadCast) || (setting.wd.mode.bits.enable)){
+      //start weather-task
+      xTaskCreatePinnedToCore(taskWeather, "taskWeather", 13000, NULL, 8, &xHandleWeather, ARDUINO_RUNNING_CORE1);
+    }
+  }
+#endif  
+#ifdef GSM_MODULE
+  //start Gsm-task
+  xTaskCreatePinnedToCore(taskGsm, "taskGsm", 4096, NULL, 3, &xHandleGsm, ARDUINO_RUNNING_CORE1);
+#endif
 }
 
 
