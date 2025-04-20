@@ -2199,19 +2199,15 @@ void setupGPIOPins()
 
     AnemometerPin = {2,3,-1}; //WindDir, WindSpeed, RainGauge
     PinOneWire = 4; //pin for one-Wire
-
+    
     #ifdef TINY_GSM_MODEM_SIM7080
-      GSMPin.Rst = 7; //is PowerKey
-      GSMPin.Tx = 5;
-      GSMPin.Rx = 6;
+      GSMPin = {7,-1,5,6} //Rst, Power, Tx, Rx
     #endif
 
     pinMode(35,OUTPUT);
     digitalWrite(35,LOW); //switch user-LED off
 
-    PowerPin.ExtPower = 36; //pin for external Voltage-control
-    PowerPin.ADCCtrl = 37; //pin for reading battery-voltage
-    PowerPin.ADCVoltage = 1;
+    PowerPin = {36,-1,37,1}; //ExtPower, ExtPowerOnOff, ADCCtrl, ADCVoltage
     adcVoltageMultiplier =  5.2636f;
     break;
   case eBoard::HELTEC_LORA_V3:
