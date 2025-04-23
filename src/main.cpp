@@ -169,6 +169,7 @@ FanetLora fanet;
 FlarmDataPort flarmDataPort;
 #ifdef AIRMODULE
 HardwareSerial NMeaSerial(2);
+HardwareSerial SerialInput(1); // Use UART1 for External GPS/Vario
 #endif
 //MicroNMEA library structures
 
@@ -1032,6 +1033,7 @@ void sendAWUdp(String msg){
 void sendData2Client(char *buffer,int iLen){
   //log_i("endChar=%02X;len=%d",buffer[iLen],iLen);
   //size_t bufLen = strlen(buffer);
+  
   if (setting.outputMode == eOutput::oUDP){
     //output via udp
     if ((WiFi.status() == WL_CONNECTED) || (WiFi.softAPgetStationNum() > 0)){ //connected to wifi or a client is connected to me
@@ -1047,6 +1049,7 @@ void sendData2Client(char *buffer,int iLen){
     //Serial.print(buffer); 
     //log_i("serial write %s",buffer);
     Serial.write(buffer,iLen);
+    Serial.println();
   }
   #ifdef BLUETOOTH
   if (setting.outputMode == eOutput::oBLE){ //output over ble-connection
@@ -1951,11 +1954,11 @@ void setupGPIOPins()
 
     LoraPin = {12,14,13,8,11,10,9}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
     OLEDPMUPin = {-1,-1,-1}; //Rst, SDA, SCL
-    BaroPin = {39,38}; //SDA, SCL
+    //BaroPin = {39,38}; //SDA, SCL
+    //BaroPin = {48,47}; //SDA, SCL //Bluefly - GPS and VARIO on same pins
     pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
-
     if (setting.Mode==AIR_MODULE) {
-      GpsPin = {48,47,17}; //Tx, Rx, PPS
+      //GpsPin = {48,47,17}; //Tx, Rx, PPS
       //V3.0.0 changed from PIN 0 to PIN 25
       PinBuzzer = 45; // same as user LED !!
     } else {
@@ -3685,8 +3688,41 @@ void checkSystemCmd(const char *ch_str){
 }
 
 
+void parseLK8EX1Data(const char* data) {
+  // Example LK8EX1 format: $LK8EX1,101300,99999,99999,99,999,*CS
+  sendData2Client(const_cast<char*>(data), strlen(data));
+  char buffer[MAXSTRING];
+  strncpy(buffer, data, MAXSTRING - 1);
+  buffer[MAXSTRING - 1] = '\0'; // Ensure null-termination
+
+  status.vario.bHasVario = true;
+  // Tokenize the string using ',' as the delimiter
+  char* token = strtok(buffer, ",");
+  int fieldIndex = 0;
+  while (token != nullptr) {
+      switch (fieldIndex) {
+          case 1: //Pressure
+              status.vario.pressure = atof(token) / 10.0; // Convert to hPa
+              break;
+          case 2: //Altitude (2nd field, index 1)
+              status.vario.alt = atof(token) / 10.0; // Convert to m
+              break;
+          case 3: // Climb rate field (4th field, index 3)
+              status.vario.ClimbRate = atof(token) / 100.0; // Convert to m/s
+              break;
+          case 4: // Temperature field (5th field, index 4)
+              status.vario.temp = atof(token) / 10.0; // Convert to °C
+              break;
+          default:
+              break;
+      }
+      token = strtok(nullptr, ",");
+      fieldIndex++;
+  }
+}
+
 void checkReceivedLine(const char *ch_str){
-  //log_i("new serial msg=%s",ch_str);
+  log_i("new serial msg=%s",ch_str);
   if(!strncmp(ch_str, FANET_CMD_TRANSMIT, 4)){
     fanet.fanet_cmd_transmit(ch_str+4);
     return;
@@ -3695,6 +3731,9 @@ void checkReceivedLine(const char *ch_str){
     return;
   }else if (!strncmp(ch_str,SYSTEM_CMD,4)){
     checkSystemCmd(ch_str);
+    return;
+  }else if (!strncmp(ch_str, "$LK8EX1,", 8)) {
+    parseLK8EX1Data(ch_str);       
     return;
   }else if (!strncmp(ch_str,GPS_STATE,2)){
     //got GPS-Info
@@ -3761,7 +3800,7 @@ void readGPS(){
   static char lineBuffer[255];
   static uint16_t recBufferIndex = 0;
   static uint32_t tGpsOk = millis();
-  
+
   if (sNmeaIn.length() > 0){ //String received by Bluetooth or serial, ...
     #ifdef GXTEST
     if (true){
@@ -4266,6 +4305,26 @@ bool setupUbloxConfig(){
 }
 #endif
 
+void takeSerialInput()
+{
+  //if (!setting.gps.Baud != 57600) write_gpsBaud(); // No GPS baudrate set, skip serial input
+  // Initialize SerialInput with GPIO 47 (RX) and GPIO 48 (TX)
+  SerialInput.begin(57600, SERIAL_8N1, 47, 48); // Baud rate: 9600, 8N1 format
+   // Check if data is available on SerialInput
+   if (SerialInput.available()) {
+    // Read the incoming data
+    String receivedData = SerialInput.readStringUntil('\n'); // Read until newline character
+
+    // Output the received data to sendData2Client
+    if (receivedData.length() > 0) {
+        receivedData += '\n'; // Add the carriage return back
+        char *data = new char[receivedData.length() + 1];
+        strcpy(data, receivedData.c_str());
+        checkReceivedLine(data); // Call the function to process the received data
+        delete[] data; // Free allocated memory
+    }
+}
+}
 
 void taskStandard(void *pvParameters){
   static uint32_t tLoop = micros();
@@ -4309,11 +4368,15 @@ void taskStandard(void *pvParameters){
   }  
 
   #ifdef AIRMODULE
+
   if (GpsPin.Rx >= 0){
     NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GpsPin.Rx,-1,false); //clear Tx-Pin, cause maybe it is used twice
     log_i("GPS Baud=%d,8N1,RX=%d,TX=%d",setting.gps.Baud,GpsPin.Rx,GpsPin.Tx);
     delay(2000); //wait 1 second until power is stable
-    checkGPSBaudrates();
+    //checkGPSBaudrates();
+    setting.gps.Baud = 57600; //set default baudrate to 57600
+      write_gpsBaud();
+    NMeaSerial.updateBaudRate(setting.gps.Baud); //set baudrate to 57600
     //clear serial buffer
     //while (NMeaSerial.available())
     //  NMeaSerial.read();
@@ -4584,6 +4647,7 @@ void taskStandard(void *pvParameters){
     }
 
     #ifdef AIRMODULE
+    takeSerialInput();
     //if (setting.Mode == eMode::AIR_MODULE){
     readGPS();
     //}
