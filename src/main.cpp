@@ -1952,16 +1952,13 @@ void setupGPIOPins()
     LoraPin = {12,14,13,8,11,10,9}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
     OLEDPMUPin = {-1,-1,-1}; //Rst, SDA, SCL
     BaroPin = {39,38}; //SDA, SCL
-
     pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
 
     if (setting.Mode==AIR_MODULE) {
-     GSMPin.Rx = 48;// TX = Greeen
-     GpsPin.Tx = 47;// RX = White
-     GpsPin.PPS =17;
-     //V3.0.0 changed from PIN 0 to PIN 25
-     PinBuzzer = 45; // same as user LED !!
-  } else {
+      GpsPin = {48,47,17}; //Tx, Rx, PPS
+      //V3.0.0 changed from PIN 0 to PIN 25
+      PinBuzzer = 45; // same as user LED !!
+    } else {
      // not enough analog Input pins !!!
      // most are already occupied by E-Ink
      AnemometerPin = {17,48,-1}; //WindDir, WindSpeed, RainGauge
@@ -2248,7 +2245,7 @@ xOutputMutex = xSemaphoreCreateMutex();
       xTaskCreatePinnedToCore(taskLogger, "taskLogger", 6500, NULL, 4, &xHandleLogger, ARDUINO_RUNNING_CORE1); //background Logger
     #endif
     //#ifndef S3CORE  //still in progress
-    xTaskCreatePinnedToCore(taskBaro, "taskBaro", 6500, NULL, 9, &xHandleBaro, ARDUINO_RUNNING_CORE0); //high priority task
+    xTaskCreatePinnedToCore(taskBaro, "taskBaro", 6500, NULL, 9, &xHandleBaro, ARDUINO_RUNNING_CORE1); //high priority task
     //#endif
   }
 #endif  
@@ -2257,7 +2254,7 @@ xOutputMutex = xSemaphoreCreateMutex();
   //log_i("currHeap:%d,minHeap:%d", xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
 
 #ifdef EINK
-  xTaskCreatePinnedToCore(taskEInk, "taskEInk", 6500, NULL, 8, &xHandleEInk, ARDUINO_RUNNING_CORE0); //background EInk
+  xTaskCreatePinnedToCore(taskEInk, "taskEInk", 6500, NULL, 8, &xHandleEInk, ARDUINO_RUNNING_CORE1); //background EInk
 #endif
 #if defined(SSD1306) || defined(SH1106G)
 xTaskCreatePinnedToCore(taskOled, "taskOled", 6500, NULL, 8, &xHandleOled, ARDUINO_RUNNING_CORE1); //background Oled
@@ -4038,7 +4035,7 @@ bool sendCmd2NMEA(const char* s,const char* sRet){
 bool setupQuectelGps(void){
   log_i("************ config GPS *************");
   checkGPSBaudrates();
-  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GSMPin.Rx,GpsPin.Tx,false); //reinit TX-Pin, cause it is used twice
+  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GpsPin.Rx,GpsPin.Tx,false); //reinit TX-Pin, cause it is used twice
   bool bOk = false;
   char sQuery[20];
   sprintf(sQuery,"$PQVERNO,R");
@@ -4075,7 +4072,7 @@ bool setupUbloxConfig(){
   
   checkGPSBaudrates();
   SFE_UBLOX_GNSS ublox;
-  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GSMPin.Rx,GpsPin.Tx,false); //reinit TX-Pin, cause maybe it is used twice
+  NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GpsPin.Rx,GpsPin.Tx,false); //reinit TX-Pin, cause maybe it is used twice
   ublox.begin(NMeaSerial);
   ublox.factoryReset();
 
@@ -4312,9 +4309,9 @@ void taskStandard(void *pvParameters){
   }  
 
   #ifdef AIRMODULE
-  if (GSMPin.Rx >= 0){
-    NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GSMPin.Rx,-1,false); //clear Tx-Pin, cause maybe it is used twice
-    log_i("GPS Baud=%d,8N1,RX=%d,TX=%d",setting.gps.Baud,GSMPin.Rx,GpsPin.Tx);
+  if (GpsPin.Rx >= 0){
+    NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GpsPin.Rx,-1,false); //clear Tx-Pin, cause maybe it is used twice
+    log_i("GPS Baud=%d,8N1,RX=%d,TX=%d",setting.gps.Baud,GpsPin.Rx,GpsPin.Tx);
     delay(2000); //wait 1 second until power is stable
     checkGPSBaudrates();
     //clear serial buffer
