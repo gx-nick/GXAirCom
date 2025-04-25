@@ -169,7 +169,7 @@ FanetLora fanet;
 FlarmDataPort flarmDataPort;
 #ifdef AIRMODULE
 HardwareSerial NMeaSerial(2);
-HardwareSerial SerialInput(1); // Use UART1 for External GPS/Vario
+HardwareSerial SerialBluefly(1); // Use UART1 for External GPS/Vario
 #endif
 //MicroNMEA library structures
 
@@ -228,6 +228,7 @@ GSMPins GSMPin = {-1, -1, -1, -1}; //Rst, Power, Tx, Rx
 GPSPins GpsPin = {-1, -1, -1}; //Tx, Rx, PPS
 OLEDPMUPins OLEDPMUPin = {-1, -1, -1}; //oled/PMU pins: Rst, SDA, SCL
 BaroPins BaroPin = {-1, -1}; //SDA, SCL
+ExtGPSVarioPins ExtGPSVarioPin = {-1, -1}; //Tx, Rx
 
 //BUZZER
 int8_t PinBuzzer = -1;
@@ -478,6 +479,7 @@ void sendFanetWeatherData2WI(FanetLora::weatherData *weatherData,uint8_t wiIndex
 }
 #endif
 
+#ifdef FUELSENSOR
 void readFuelSensor(uint32_t tAct){
   static uint32_t tRead = millis();
   static uint32_t tSend = millis();
@@ -511,7 +513,7 @@ void readFuelSensor(uint32_t tAct){
   }
   
 }
-
+#endif
 
 // The event handler for the button.
 void handleEvent(ace_button::AceButton* button, uint8_t eventType, uint8_t buttonState) {
@@ -1955,10 +1957,12 @@ void setupGPIOPins()
     LoraPin = {12,14,13,8,11,10,9}; //Rst, DI0, GPIO, SS, MISO, MOSI, SCK
     OLEDPMUPin = {-1,-1,-1}; //Rst, SDA, SCL
     //BaroPin = {39,38}; //SDA, SCL
-    //BaroPin = {48,47}; //SDA, SCL //Bluefly - GPS and VARIO on same pins
     pI2cOne->begin(BaroPin.SDA, BaroPin.SCL);
     if (setting.Mode==AIR_MODULE) {
-      //GpsPin = {48,47,17}; //Tx, Rx, PPS
+      //GpsPin = {48,47,17}; //Tx, Rx, PPS      
+      ExtGPSVarioPin = {48,47,17}; //SDA, SCL //Bluefly - GPS and VARIO on same pins
+      pinMode(ExtGPSVarioPin.Rx, INPUT);
+      pinMode(ExtGPSVarioPin.Tx, OUTPUT);
       //V3.0.0 changed from PIN 0 to PIN 25
       PinBuzzer = 45; // same as user LED !!
     } else {
@@ -3690,7 +3694,10 @@ void checkSystemCmd(const char *ch_str){
 
 void parseLK8EX1Data(const char* data) {
   // Example LK8EX1 format: $LK8EX1,101300,99999,99999,99,999,*CS
-  sendData2Client(const_cast<char*>(data), strlen(data));
+  if (setting.outputModeVario == eOutputVario::OVARIO_LXPW)
+  {
+    sendData2Client(const_cast<char*>(data), strlen(data));
+  }
   char buffer[MAXSTRING];
   strncpy(buffer, data, MAXSTRING - 1);
   buffer[MAXSTRING - 1] = '\0'; // Ensure null-termination
@@ -3701,17 +3708,17 @@ void parseLK8EX1Data(const char* data) {
   int fieldIndex = 0;
   while (token != nullptr) {
       switch (fieldIndex) {
-          case 1: //Pressure
+          case 1:
               status.vario.pressure = atof(token) / 10.0; // Convert to hPa
               break;
-          case 2: //Altitude (2nd field, index 1)
+          case 2:
               status.vario.alt = atof(token) / 10.0; // Convert to m
               break;
-          case 3: // Climb rate field (4th field, index 3)
+          case 3:
               status.vario.ClimbRate = atof(token) / 100.0; // Convert to m/s
               break;
-          case 4: // Temperature field (5th field, index 4)
-              status.vario.temp = atof(token) / 10.0; // Convert to °C
+          case 4:
+              status.vario.temp = atof(token);
               break;
           default:
               break;
@@ -3721,8 +3728,27 @@ void parseLK8EX1Data(const char* data) {
   }
 }
 
+bool processBFMessage(const char *ch_str) {
+  const char *keywords[] = {"$BST","$BFK","$BFL","$BFP","$BAC","$BAD","$BTH","$BFQ","$BFI","$BSQ","$BSI","$BFS","BOL","$BOS","$BRM","$BVL","$BOM","$BOF","$BQH","$BRB","$BPT","$BUR","$BLD","$BR2","BHV","$BHT","$BBZ","$BZT","$BSM","$BSD","BST","BFK","BFL","BFP","BAC","BAD","BTH","BFQ","BFI","BSQ","BSI","BFS","BOL","BOS","BRM","BVL","BOM","BOF","BQH","BRB","BPT","BUR","BLD","BR2","BHV","BHT","BBZ","BZT","BSM","BSD"};
+  size_t numKeywords = sizeof(keywords) / sizeof(keywords[0]);
+
+  for (size_t i = 0; i < numKeywords; ++i) {
+      if (strstr(ch_str, keywords[i]) != nullptr) {
+          log_i("BF message: %s", ch_str);
+
+          // Send the BF message to GPIO 48
+          if (SerialBluefly) {
+            SerialBluefly.write(ch_str); // Send the BF message
+            log_i("BF message sent");
+          }
+          
+          return true; // Found a BF command
+      }
+  }
+  return false;
+}
+
 void checkReceivedLine(const char *ch_str){
-  log_i("new serial msg=%s",ch_str);
   if(!strncmp(ch_str, FANET_CMD_TRANSMIT, 4)){
     fanet.fanet_cmd_transmit(ch_str+4);
     return;
@@ -3737,7 +3763,6 @@ void checkReceivedLine(const char *ch_str){
     return;
   }else if (!strncmp(ch_str,GPS_STATE,2)){
     //got GPS-Info
-    //log_i("GPS-Info:%s",ch_str);
     if (sNmeaIn.length() == 0){
       sNmeaIn = String(ch_str);
     }
@@ -3771,7 +3796,11 @@ void checkReceivedLine(const char *ch_str){
     // Handle configuration setting
     readPGXCFSentence(ch_str);
     return;
-  }else{
+  }else if (processBFMessage(ch_str))
+  {
+    return;
+  }
+  else{
     log_i("unknown message=%s",ch_str);
   }
 }
@@ -3781,7 +3810,7 @@ char* readSerial(){
   static uint16_t recBufferIndex = 0;
   
   int16_t thisChar;
-  while((thisChar = Serial.read())!=-1){
+  while((thisChar = Serial.read())!=-1){  
     if ((recBufferIndex >= (512-1)) || thisChar=='$' || thisChar=='!') recBufferIndex = 0; //Buffer overrun, $ and ! are start of NMEA-String
     lineBuffer[recBufferIndex] = thisChar;
     if (lineBuffer[recBufferIndex] == '\n' && recBufferIndex>10){
@@ -3911,19 +3940,6 @@ void Fanet2FlarmData(FanetLora::trackingData *FanetData,FlarmtrackingData *Flarm
 
 void sendLXPW(uint32_t tAct){
   if (WebUpdateRunning) return;
-  // $LXWP0,logger_stored, airspeed, airaltitude,
-  //   v1[0],v1[1],v1[2],v1[3],v1[4],v1[5], hdg, windspeed*CS<CR><LF>
-  //
-  // 0 loger_stored : [Y|N] (not used in LX1600)
-  // 1 IAS [km/h] ----> Condor uses TAS!
-  // 2 baroaltitude [m]
-  // 3-8 vario values [m/s] (last 6 measurements in last second)
-  // 9 heading of plane (not used in LX1600)
-  // 10 windcourse [deg] (not used in LX1600)
-  // 11 windspeed [km/h] (not used in LX1600)
-  //
-  // e.g.:
-  // $LXWP0,Y,222.3,1665.5,1.71,,,,,,239,174,10.1
   static uint32_t tOld = millis();
   if ((tAct - tOld) >= 250){
     char sOut[MAXSTRING];
@@ -3945,23 +3961,6 @@ void sendLXPW(uint32_t tAct){
     pos += snprintf(&sOut[pos],MAXSTRING-pos,",,");
     pos = flarmDataPort.addChecksum(sOut,MAXSTRING);
     sendData2Client(sOut,pos);
-    /*
-    String s = "$LXWP0,N,";
-    if (status.gps.Fix){
-      s += String(status.gps.speed,1);
-    }
-    s += ",";
-    if (status.vario.bHasVario){
-      s += String(status.vario.alt,1) + "," + String(status.vario.ClimbRate,2); // altitude in meters, relative to QNH 1013.25
-    }
-    s+=  + ",,,,,,";
-    if (status.gps.Fix){
-      s += String(status.gps.course,1);
-    }
-    s +=  ",,";
-    s = flarmDataPort.addChecksum(s);
-    sendData2Client(s);
-    */
     tOld = tAct;
   }
 }
@@ -4305,15 +4304,13 @@ bool setupUbloxConfig(){
 }
 #endif
 
-void takeSerialInput()
+void takeExtVarioGPSSerialInput()
 {
   //if (!setting.gps.Baud != 57600) write_gpsBaud(); // No GPS baudrate set, skip serial input
-  // Initialize SerialInput with GPIO 47 (RX) and GPIO 48 (TX)
-  SerialInput.begin(57600, SERIAL_8N1, 47, 48); // Baud rate: 9600, 8N1 format
-   // Check if data is available on SerialInput
-   if (SerialInput.available()) {
+  // Check if data is available on SerialInput
+   if (SerialBluefly.available()) {
     // Read the incoming data
-    String receivedData = SerialInput.readStringUntil('\n'); // Read until newline character
+    String receivedData = SerialBluefly.readStringUntil('\n'); // Read until newline character
 
     // Output the received data to sendData2Client
     if (receivedData.length() > 0) {
@@ -4373,9 +4370,7 @@ void taskStandard(void *pvParameters){
     NMeaSerial.begin(setting.gps.Baud,SERIAL_8N1,GpsPin.Rx,-1,false); //clear Tx-Pin, cause maybe it is used twice
     log_i("GPS Baud=%d,8N1,RX=%d,TX=%d",setting.gps.Baud,GpsPin.Rx,GpsPin.Tx);
     delay(2000); //wait 1 second until power is stable
-    //checkGPSBaudrates();
-    setting.gps.Baud = 57600; //set default baudrate to 57600
-      write_gpsBaud();
+    checkGPSBaudrates();
     NMeaSerial.updateBaudRate(setting.gps.Baud); //set baudrate to 57600
     //clear serial buffer
     //while (NMeaSerial.available())
@@ -4383,7 +4378,10 @@ void taskStandard(void *pvParameters){
     //delay(100);
     //sendCmd2NMEA("$PMTK353,1,0,1,0,0","$PMTK001,353,3,1,0,1,0,0,13*07"); //enable GPS & Galileo
   }
-  
+
+  // Initialize SerialBluefly with GPIO 47 (RX) and GPIO 48 (TX)
+  SerialBluefly.begin(57600, SERIAL_8N1, ExtGPSVarioPin.Rx, ExtGPSVarioPin.Tx); // Baud rate: 9600, 8N1 format
+     
   if (GpsPin.PPS > 0){  
     //only on new boards we have an pps-pin
     log_i("setup PPS-Pin for GPS");
@@ -4576,8 +4574,9 @@ void taskStandard(void *pvParameters){
     }
     sButton[1].state = 0;
 
+    #ifdef FUELSENSOR
     if (setting.bHasFuelSensor) readFuelSensor(tAct);
-
+    #endif
     if (setting.OGNLiveTracking.mode > 0){
       if (status.vario.bHasVario){
         ogn.setStatusData(status.vario.pressure ,status.vario.temp,NAN,(float)status.battery.voltage / 1000.,status.battery.percent);
@@ -4647,7 +4646,9 @@ void taskStandard(void *pvParameters){
     }
 
     #ifdef AIRMODULE
-    takeSerialInput();
+    if (ExtGPSVarioPin.Rx >= 0) {
+      takeExtVarioGPSSerialInput();
+    }
     //if (setting.Mode == eMode::AIR_MODULE){
     readGPS();
     //}
@@ -4833,7 +4834,7 @@ void taskStandard(void *pvParameters){
     }    
     flarmDataPort.run();
     if (setting.outputModeVario == eOutputVario::OVARIO_LK8EX1) sendLK8EX(tAct);
-    if (setting.outputModeVario == eOutputVario::OVARIO_LXPW) sendLXPW(tAct); //not output 
+    if (setting.outputModeVario == eOutputVario::OVARIO_LXPW && ExtGPSVarioPin.Rx != -1) sendLXPW(tAct); //not output 
     #ifdef AIRMODULE
     if ((setting.Mode == eMode::AIR_MODULE) || ((abs(setting.gs.lat) <= 0.1) && (abs(setting.gs.lon) <= 0.1))){ //in GS-Mode we use the GPS, if in settings disabled
       if ((GpsPin.PPS < 0) && (!status.gps.bExtGps)){
@@ -4849,14 +4850,14 @@ void taskStandard(void *pvParameters){
         //log_i("PPS-Triggered t=%d",status.gps.tCycle);
       }
       if (nmea.isNewMsgValid()){
-        //log_i("lat=%d;lon=%d",nmea.getLatitude(),nmea.getLongitude());
-        //long alt2 = 0;
-        //nmea.getAltitude(alt2);
-        //log_i("alt=%d,speed=%d,course=%d",alt2,nmea.getSpeed(),nmea.getCourse());
-        //log_i("GPS-FixTime=%s",nmea.getFixTime().c_str());
+        log_i("lat=%d;lon=%d",nmea.getLatitude(),nmea.getLongitude());
+        long alt2 = 0;
+        nmea.getAltitude(alt2);
+        log_i("alt=%d,speed=%d,course=%d",alt2,nmea.getSpeed(),nmea.getCourse());
+        log_i("GPS-FixTime=%s",nmea.getFixTime().c_str());
         status.gps.tCycle = tAct - tOldPPS;
         if (nmea.isValid()){
-          //log_i("nmea is valid");
+          log_i("nmea is valid");
           long alt = 0;
           nmea.getAltitude(alt);
           #ifdef AIRMODULE
@@ -4872,7 +4873,7 @@ void taskStandard(void *pvParameters){
             status.gps.speed = nmea.getSpeed()*1.852/1000.; //speed in cm/s --> we need km/h
             status.gps.course = nmea.getCourse()/1000.;
           status.gps.hdop = nmea.getHDOP();
-          //log_i("hdop=%d",status.gps.hdop);
+          log_i("hdop=%d",status.gps.hdop);
           // create a global variable for logger igc file name based on GPS datetime
             //set today date
             // if got a correct date i.e. with year
@@ -4883,7 +4884,7 @@ void taskStandard(void *pvParameters){
           }
           long geoidalt = 0;
           nmea.getGeoIdAltitude(geoidalt);
-          //log_i("latlon=%d,%d",nmea.getLatitude(),nmea.getLongitude());
+          log_i("latlon=%d,%d",nmea.getLatitude(),nmea.getLongitude());
           status.gps.Lat = nmea.getLatitude() / 1000000.;
           status.gps.Lon = nmea.getLongitude() / 1000000.;
           #ifdef FLARMTEST
@@ -4914,7 +4915,7 @@ void taskStandard(void *pvParameters){
           MyFanetData.lon = status.gps.Lon;
           MyFanetData.altitude = status.gps.alt;
           MyFanetData.hdop = status.gps.hdop;
-          //log_i("lat=%.6f;lon=%.6f;alt=%.1f;geoAlt=%.1f",status.gps.Lat,status.gps.Lon,status.gps.alt,geoidalt/1000.);
+          log_i("lat=%.6f;lon=%.6f;alt=%.1f;geoAlt=%.1f",status.gps.Lat,status.gps.Lon,status.gps.alt,geoidalt/1000.);
           if (fanet.onGround){
             MyFanetData.speed = 0.0;
           }else{

@@ -47,14 +47,20 @@ struct GPSPins {
   int8_t PPS;
 };
 
-//OLED-Display / PMU
-struct OLEDPMUPins { 
-  int8_t Rst;
+struct BaroPins { //Baro-Module
   int8_t SDA;
   int8_t SCL;
 };
 
-struct BaroPins { //Baro-Module
+struct ExtGPSVarioPins { //Vario/GPS
+  int8_t Tx;
+  int8_t Rx;
+  int8_t PPS;
+};
+
+//OLED-Display / PMU
+struct OLEDPMUPins { 
+  int8_t Rst;
   int8_t SDA;
   int8_t SCL;
 };
